@@ -14,8 +14,7 @@ use App\Controllers\AdminController;
 use App\Middleware\AuthMiddleware;
 use App\Middleware\AdminMiddleware;
 
-if (session_status() === PHP_SESSION_NONE)
-{
+if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
@@ -32,20 +31,16 @@ $app->addErrorMiddleware(true, true, true);
 
 // ! only for development!!!!
 // Add CORS middleware for development (must be last to execute first)
-$app->add(function (Request $request, RequestHandler $handler)
-{
+$app->add(function (Request $request, RequestHandler $handler) {
     // Handle preflight OPTIONS request
-    if ($request->getMethod() === 'OPTIONS')
-    {
+    if ($request->getMethod() === 'OPTIONS') {
         $response = new \Slim\Psr7\Response();
         $response = $response->withStatus(200);
-    }
-    else
-    {
+    } else {
         $response = $handler->handle($request);
     }
     $response = $response->withHeader('Access-Control-Max-Age', '86400');
-    $response = $response->withHeader('Access-Control-Allow-Origin', 'http://localhost:5173');
+    $response = $response->withHeader('Access-Control-Allow-Origin', $_ENV['UPLOAD_URL']);
     $response = $response->withHeader('Access-Control-Allow-Credentials', 'true');
     $response = $response->withHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Origin, Authorization');
     $response = $response->withHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
@@ -54,15 +49,13 @@ $app->add(function (Request $request, RequestHandler $handler)
 });
 
 // Basic Route
-$app->get('/', function (Request $request, Response $response, $args)
-{
+$app->get('/', function (Request $request, Response $response, $args) {
     $response->getBody()->write("Welcome to Slim + Eloquent Project!");
     return $response;
 });
 
 // User Routes
-$app->group('/users', function ($group)
-{
+$app->group('/users', function ($group) {
     $group->get('/', [UserController::class, 'index']);
     $group->post('/register', [UserController::class, 'register']);
     $group->post('/login', [UserController::class, 'login']);
@@ -72,8 +65,7 @@ $app->group('/users', function ($group)
 });
 
 // File Routes (protected by auth middleware)
-$app->group('/files', function ($group)
-{
+$app->group('/files', function ($group) {
     $group->post('/upload', [FileController::class, 'upload']);
     $group->get('/valid-mime-types', [FileController::class, 'getValidMimeTypes']);
     $group->get('/uploads', [FileController::class, 'getUserUploads']);
@@ -88,8 +80,7 @@ $app->get('/wp-content/uploads/{path:.+}', [FileController::class, 'serveWpConte
 $app->get('/stats', [StatsController::class, 'index'])->add(AuthMiddleware::class);
 
 // Admin Routes (protected by admin middleware)
-$app->group('/admin', function ($group)
-{
+$app->group('/admin', function ($group) {
     // File management
     $group->get('/files', [AdminController::class, 'getAllFiles']);
     $group->delete('/files/{id}', [AdminController::class, 'deleteFile']);
