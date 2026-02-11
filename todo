@@ -1,0 +1,3 @@
+remove allow origin
+hide errors in slime
+on refresh, it comes on login
