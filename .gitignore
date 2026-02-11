@@ -26,3 +26,6 @@ client/android
 *.sln
 *.sw?
 .env
+ssl/*.pem
+ssl/*.key
+ssl/*.crt

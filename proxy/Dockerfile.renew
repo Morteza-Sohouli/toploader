@@ -1,0 +1,8 @@
+# Certbot + docker-cli for renewal and nginx reload
+FROM alpine:3.19
+RUN apk add --no-cache certbot docker-cli
+COPY renew.sh /renew.sh
+RUN chmod +x /renew.sh
+# Cron: run renew daily at 03:00
+RUN echo "0 3 * * * /renew.sh >> /var/log/renew.log 2>&1" > /etc/crontabs/root
+CMD ["crond", "-f", "-l", "2"]
