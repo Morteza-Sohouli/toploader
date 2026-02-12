@@ -15,6 +15,9 @@ COPY . .
 # Build for production
 RUN npm run build
 
+# Ensure Vite emitted assets (fails if build was cached with no output)
+RUN test -d /app/dist/assets && test -n "$(ls -A /app/dist/assets 2>/dev/null)" || (echo "Build did not produce dist/assets – rebuild with: docker compose build client --no-cache" && exit 1)
+
 # Dev stage: Node + app for "npm run dev" in docker-compose
 FROM node:20-alpine AS dev
 WORKDIR /app
