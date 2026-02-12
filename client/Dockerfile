@@ -12,13 +12,17 @@ RUN npm install
 # Copy application files
 COPY . .
 
-# API base URL (set at build time for production bundle)
-ARG VITE_API_BASE_URL=http://localhost:3000
-ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
-
 # Build for production
 RUN npm run build
 
+# Dev stage: Node + app for "npm run dev" in docker-compose
+FROM node:20-alpine AS dev
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 80
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "80"]
 
 # Production stage
 FROM nginx:alpine

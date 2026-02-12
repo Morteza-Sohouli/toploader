@@ -57,6 +57,7 @@ services:
     build:
       context: ./client
       dockerfile: Dockerfile
+      target: dev
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL}
     ports:
@@ -66,7 +67,7 @@ services:
     volumes:
       - ./client:/app
       - /app/node_modules
-    command: npm run dev -- --host 0.0.0.0
+    command: npm run dev -- --host 0.0.0.0 --port 80
 
   server:
     build:
