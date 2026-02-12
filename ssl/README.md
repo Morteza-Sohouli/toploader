@@ -1,13 +1,13 @@
 # SSL certificates for HTTPS
 
-The reverse proxy in `proxy/nginx.conf` expects these files in `ssl/`:
+The reverse proxy expects these files in `ssl/` (created automatically when using Let's Encrypt):
 
 - `cert.pem` – certificate (full chain)
 - `key.pem` – private key
 
-## Docker Compose (recommended): certbot + cron renewal
+## Docker Compose: automatic Let's Encrypt
 
-Certbot runs in containers. Initial cert is obtained with a one-off service; renewal runs **daily at 03:00** via cron inside the `certbot-renew` container.
+The proxy **obtains a real Let's Encrypt certificate automatically** on first start. Renewal runs **daily at 03:00** via the `certbot-renew` container.
 
 ### 1. Set domain and email in `.env`
 
@@ -18,17 +18,15 @@ SSL_EMAIL=you@example.com
 
 Also set `VITE_API_BASE_URL=https://yourdomain.com/api` and `UPLOAD_URL=https://yourdomain.com` for the app.
 
-### 2. Get the first certificate (one-off)
+### 2. First run (cert is obtained automatically)
 
-Your domain must point to this host. **Stop the proxy** so port 80 is free, then run:
+Your domain must point to this server. Port 80 must be free. Then run:
 
 ```bash
-docker compose stop proxy
-docker compose --profile ssl-init run --rm -p 80:80 certbot-init
-docker compose up -d
+docker compose up -d --build
 ```
 
-This obtains a Let's Encrypt cert and writes `ssl/cert.pem` and `ssl/key.pem`. Then start the full stack (including the renewal cron).
+The proxy will request a certificate from Let's Encrypt, write `ssl/cert.pem` and `ssl/key.pem`, then start nginx. No separate certbot step needed.
 
 ### 3. Normal run (with renewal cron)
 
@@ -64,7 +62,7 @@ Put your full chain in `ssl/cert.pem` and the private key in `ssl/key.pem`, then
 
 ## Using the HTTPS proxy
 
-1. Ensure `ssl/cert.pem` and `ssl/key.pem` exist (Docker certbot-init or manual).
+1. Set `SSL_DOMAIN` and `SSL_EMAIL` in `.env`; the proxy obtains the cert on first start.
 2. In `.env`: `VITE_API_BASE_URL=https://yourdomain.com/api`, `UPLOAD_URL=https://yourdomain.com`.
 3. Use the **production** client (no `command` override for the `client` service in `docker-compose.yml`), then:
    ```bash

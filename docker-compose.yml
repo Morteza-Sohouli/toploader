@@ -1,20 +1,26 @@
 services:
   proxy:
-    image: nginx:alpine
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      SSL_DOMAIN: ${SSL_DOMAIN}
+      SSL_EMAIL: ${SSL_EMAIL}
     volumes:
       - ./proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
+      - ./ssl:/etc/nginx/ssl
+      - letsencrypt_data:/etc/letsencrypt
       - acme_webroot:/var/www/certbot
     depends_on:
       - client
       - server
     restart: unless-stopped
 
-  # One-off: obtain initial certificate. Stop proxy first, then:
-  #   docker compose run --rm -p 80:80 certbot-init
+  # Optional one-off if you prefer to get cert before starting proxy (e.g. proxy not yet built):
+  #   docker compose stop proxy && docker compose --profile ssl-init run --rm -p 80:80 certbot-init && docker compose up -d
   certbot-init:
     image: certbot/certbot
     environment:
