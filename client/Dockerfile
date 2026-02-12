@@ -6,8 +6,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies (ci for reproducible builds)
+RUN npm ci
 
 # Copy application files
 COPY . .
@@ -24,10 +24,9 @@ COPY . .
 EXPOSE 80
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "80"]
 
-# Production stage
+# Production stage (used by docker-compose; serves built SPA)
 FROM nginx:alpine
 
-# Copy built assets from build stage
 COPY --from=build /app/dist /usr/share/nginx/html
 
 # Copy nginx configuration
