@@ -29,7 +29,7 @@ FIRST_DOMAIN=$(echo "$SSL_DOMAINS" | cut -d',' -f1)
 
 echo "Obtaining Let's Encrypt certificate for $SSL_DOMAINS ..."
 certbot certonly --standalone $DOMAIN_FLAGS --email "$SSL_EMAIL" \
-  --agree-tos --non-interactive --preferred-challenges http
+  --agree-tos --non-interactive --preferred-challenges http --expand
 
 echo "Copying certificates to $SSL_DIR ..."
 cp "/etc/letsencrypt/live/$FIRST_DOMAIN/fullchain.pem" "$CERT"

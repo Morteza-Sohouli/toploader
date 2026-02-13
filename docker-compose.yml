@@ -32,7 +32,7 @@ services:
     command: >
       sh -c "DOMAIN_FLAGS=''; OLD_IFS=\"$$IFS\"; IFS=','; for d in $$SSL_DOMAINS; do DOMAIN_FLAGS=\"$$DOMAIN_FLAGS -d $$d\"; done; IFS=\"$$OLD_IFS\";
       certbot certonly --standalone $$DOMAIN_FLAGS --email $$SSL_EMAIL
-      --agree-tos --non-interactive
+      --agree-tos --non-interactive --expand
       && FIRST_DOMAIN=$$(echo $$SSL_DOMAINS | cut -d',' -f1)
       && cp /etc/letsencrypt/live/$$FIRST_DOMAIN/fullchain.pem /ssl/cert.pem
       && cp /etc/letsencrypt/live/$$FIRST_DOMAIN/privkey.pem /ssl/key.pem"
