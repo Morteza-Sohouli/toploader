@@ -71,7 +71,7 @@ services:
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       UPLOAD_URL: ${UPLOAD_URL}
-      WP_UPLOADS_PATH: ${WP_UPLOADS_PATH}
+      WP_UPLOADS_PATH: /var/www/wp-content/uploads
       MAX_FILE_SIZE: ${MAX_FILE_SIZE}
     volumes:
       - ./server:/var/www/html
