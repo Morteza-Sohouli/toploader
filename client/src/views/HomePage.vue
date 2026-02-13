@@ -13,23 +13,23 @@
             >
               تاپلودر
             </router-link>
-            <div class="hidden md:flex gap-4">
+            <div class="flex flex-wrap gap-2 md:gap-4">
               <router-link
                 to="/"
-                class="px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                class="px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors [&.router-link-exact-active]:bg-gray-200 [&.router-link-exact-active]:dark:bg-gray-600"
               >
                 داشبورد
               </router-link>
               <router-link
                 to="/upload"
-                class="px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                class="px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors [&.router-link-exact-active]:bg-gray-200 [&.router-link-exact-active]:dark:bg-gray-600"
               >
                 آپلود فایل
               </router-link>
               <router-link
                 v-if="user?.is_admin"
                 to="/admin"
-                class="px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-red-600 dark:text-red-400 transition-colors"
+                class="px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-red-600 dark:text-red-400 transition-colors [&.router-link-exact-active]:bg-gray-200 [&.router-link-exact-active]:dark:bg-gray-600"
               >
                 پنل مدیریت
               </router-link>

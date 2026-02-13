@@ -103,6 +103,7 @@ $app->get('/files/serve', [FileController::class, 'serveFile']);
 
 // WordPress wp-content/uploads: serve files and log downloads (path e.g. 2026/02/filename.rar)
 $app->get('/wp-content/uploads/{path:.+}', [FileController::class, 'serveWpContentFile']);
+$app->get('/uploads/{path:.+}', [FileController::class, 'serveWpContentFile']);
 
 // Stats Route (protected by auth middleware)
 $app->get('/stats', [StatsController::class, 'index'])->add(AuthMiddleware::class);
