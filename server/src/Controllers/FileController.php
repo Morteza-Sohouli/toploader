@@ -27,21 +27,24 @@ class FileController extends Controller
     {
         // Get authenticated user (authentication already verified by middleware)
         $user = User::find($_SESSION['user_id']);
-        if (!$user) {
+        if (!$user)
+        {
             return $this->json($response, ['error' => 'User not found'], 404);
         }
 
         // Get uploaded files
         $uploadedFiles = $request->getUploadedFiles();
 
-        if (empty($uploadedFiles['file'])) {
+        if (empty($uploadedFiles['file']))
+        {
             return $this->json($response, ['error' => 'No file uploaded'], 400);
         }
 
         $uploadedFile = $uploadedFiles['file'];
 
         // Check for upload errors
-        if ($uploadedFile->getError() !== UPLOAD_ERR_OK) {
+        if ($uploadedFile->getError() !== UPLOAD_ERR_OK)
+        {
             return $this->json($response, ['error' => 'File upload error: ' . $this->getUploadErrorMessage($uploadedFile->getError())], 400);
         }
 
@@ -50,27 +53,31 @@ class FileController extends Controller
         $fileSize = $uploadedFile->getSize();
 
         // Validate file size
-        if ($fileSize > self::MAX_FILE_SIZE) {
+        if ($fileSize > self::MAX_FILE_SIZE)
+        {
             return $this->json($response, [
                 'error' => 'File size exceeds maximum allowed size of ' . ($this->formatBytes(self::MAX_FILE_SIZE))
             ], 400);
         }
 
-        if ($fileSize === 0) {
+        if ($fileSize === 0)
+        {
             return $this->json($response, ['error' => 'Uploaded file is empty'], 400);
         }
 
         // Get file extension
         $fileExtension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
 
-        if (empty($fileExtension)) {
+        if (empty($fileExtension))
+        {
             return $this->json($response, ['error' => 'File has no extension'], 400);
         }
 
         // Validate file type against user's allowed file types
         $allowedFileTypes = $this->parseAllowedFileTypes($user->allowedFileTypes);
 
-        if (!in_array($fileExtension, $allowedFileTypes)) {
+        if (!in_array($fileExtension, $allowedFileTypes))
+        {
             return $this->json($response, [
                 'error' => 'File type "' . $fileExtension . '" is not allowed. Allowed types: ' . implode(', ', $allowedFileTypes)
             ], 400);
@@ -78,27 +85,31 @@ class FileController extends Controller
 
         // Additional MIME type validation for extra security
         $mimeType = $uploadedFile->getClientMediaType();
-        if (!$this->isValidMimeType($mimeType, $fileExtension)) {
+        if (!$this->isValidMimeType($mimeType, $fileExtension))
+        {
             return $this->json($response, [
                 'error' => 'File MIME type does not match extension'
             ], 400);
         }
 
         // Create upload directory if it doesn't exist
-        if (!is_dir(self::UPLOAD_DIR)) {
+        if (!is_dir(self::UPLOAD_DIR))
+        {
             mkdir(self::UPLOAD_DIR, 0755, true);
         }
 
         // Create user-specific subdirectory
         $userUploadDir = self::UPLOAD_DIR . $user->id . '/';
-        if (!is_dir($userUploadDir)) {
+        if (!is_dir($userUploadDir))
+        {
             mkdir($userUploadDir, 0755, true);
         }
 
         // Create date-based subdirectory: YYYY/MM/DD
         $datePath = date('Y/m/d') . '/';
         $datedUploadDir = $userUploadDir . $datePath;
-        if (!is_dir($datedUploadDir)) {
+        if (!is_dir($datedUploadDir))
+        {
             mkdir($datedUploadDir, 0755, true);
         }
 
@@ -107,16 +118,20 @@ class FileController extends Controller
         $targetPath = $datedUploadDir . $sanitizedFilename;
 
         // Move uploaded file using streaming (memory-efficient for large files)
-        try {
+        try
+        {
             $uploadedFile->moveTo($targetPath);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e)
+        {
             return $this->json($response, [
                 'error' => 'Failed to save file: ' . $e->getMessage()
             ], 500);
         }
 
         // Save file metadata to database
-        try {
+        try
+        {
             $fileRecord = File::create([
                 'owner' => $user->id,
                 'name' => $sanitizedFilename,
@@ -124,9 +139,12 @@ class FileController extends Controller
                 'size' => $fileSize,
                 'path' => $targetPath,
             ]);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e)
+        {
             // If database save fails, try to delete the uploaded file
-            if (file_exists($targetPath)) {
+            if (file_exists($targetPath))
+            {
                 unlink($targetPath);
             }
             return $this->json($response, [
@@ -155,7 +173,8 @@ class FileController extends Controller
      */
     private function parseAllowedFileTypes(?string $allowedFileTypes): array
     {
-        if (empty($allowedFileTypes)) {
+        if (empty($allowedFileTypes))
+        {
             return [];
         }
 
@@ -228,7 +247,8 @@ class FileController extends Controller
             'aac' => ['audio/aac'],
         ];
 
-        if (!isset($mimeMap[$extension])) {
+        if (!isset($mimeMap[$extension]))
+        {
             // If extension not in map, allow it (permissive approach)
             return true;
         }
@@ -241,7 +261,8 @@ class FileController extends Controller
      */
     private function getUploadErrorMessage(int $errorCode): string
     {
-        switch ($errorCode) {
+        switch ($errorCode)
+        {
             case UPLOAD_ERR_INI_SIZE:
                 return 'File exceeds upload_max_filesize directive in php.ini';
             case UPLOAD_ERR_FORM_SIZE:
@@ -317,14 +338,15 @@ class FileController extends Controller
     {
         // Get authenticated user
         $user = \App\Models\User::find($_SESSION['user_id']);
-        if (!$user) {
+        if (!$user)
+        {
             return $this->json($response, ['error' => 'User not found'], 404);
         }
 
         // Get pagination parameters
         $params = $request->getQueryParams();
-        $page = (int) ($params['page'] ?? 1);
-        $limit = (int) ($params['limit'] ?? 30);
+        $page = (int)($params['page'] ?? 1);
+        $limit = (int)($params['limit'] ?? 30);
         $search = $params['search'] ?? null;
         $fromDate = $params['from_date'] ?? null;
         $toDate = $params['to_date'] ?? null;
@@ -340,18 +362,22 @@ class FileController extends Controller
         $query = \App\Models\File::where('owner', $user->id);
 
         // Apply search filter
-        if ($search !== null && trim($search) !== '') {
-            $query->where(function ($q) use ($search) {
+        if ($search !== null && trim($search) !== '')
+        {
+            $query->where(function ($q) use ($search)
+            {
                 $q->where('name', 'LIKE', '%' . $search . '%');
             });
         }
 
         // Apply date range filters
-        if ($fromDate !== null && trim($fromDate) !== '') {
+        if ($fromDate !== null && trim($fromDate) !== '')
+        {
             $query->where('created_at', '>=', $fromDate . ' 00:00:00');
         }
 
-        if ($toDate !== null && trim($toDate) !== '') {
+        if ($toDate !== null && trim($toDate) !== '')
+        {
             $query->where('created_at', '<=', $toDate . ' 23:59:59');
         }
 
@@ -363,7 +389,8 @@ class FileController extends Controller
             ->skip($offset)
             ->take($limit)
             ->get()
-            ->map(function ($file) use ($user) {
+            ->map(function ($file) use ($user)
+            {
                 return [
                     'id' => $file->id,
                     'filename' => $file->name,
@@ -416,38 +443,45 @@ class FileController extends Controller
         $fileId = $params['id'] ?? null;
         $providedHash = $params['hash'] ?? null;
 
-        if (!$fileId || !$providedHash) {
+        if (!$fileId || !$providedHash)
+        {
             return $this->json($response, ['error' => 'File ID and hash are required'], 400);
         }
 
         // Generate expected hash using file ID, user ID, and salt
-        $expectedHash = hash('sha256', $fileId  . self::HASH_SALT);
+        $expectedHash = hash('sha256', $fileId . self::HASH_SALT);
 
         // Verify hash matches
-        if ($expectedHash !== $providedHash) {
+        if ($expectedHash !== $providedHash)
+        {
             return $this->json($response, ['error' => 'Invalid file access hash'], 403);
         }
 
         // Find file by ID
         $file = File::find($fileId);
-        if (!$file) {
+        if (!$file)
+        {
             return $this->json($response, ['error' => 'File not found'], 404);
         }
 
 
         // Check if file exists on disk
-        if (!file_exists($file->path)) {
+        if (!file_exists($file->path))
+        {
             return $this->json($response, ['error' => 'File not found on disk'], 404);
         }
 
         // Log the download (don't let logging failure block the download)
-        try {
+        try
+        {
             DownloadLog::create([
-                'file_id'    => $file->id,
+                'file_id' => $file->id,
                 'ip_address' => $request->getServerParams()['REMOTE_ADDR'] ?? null,
                 'user_agent' => $request->getHeaderLine('User-Agent') ?: null,
             ]);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e)
+        {
             // Silently fail — serving the file is more important than logging
         }
 
@@ -472,30 +506,35 @@ class FileController extends Controller
     public function serveWpContentFile(Request $request, Response $response, array $args): Response
     {
         $requestedPath = $args['path'] ?? '';
-        if ($requestedPath === '') {
+        if ($requestedPath === '')
+        {
             return $this->json($response, ['error' => 'Path required'], 400);
         }
 
         // Reject null bytes (directory injection / legacy PHP path issues)
-        if (strpos($requestedPath, "\0") !== false) {
+        if (strpos($requestedPath, "\0") !== false)
+        {
             return $this->json($response, ['error' => 'Invalid path'], 400);
         }
 
         $basePath = self::getWpUploadsBase();
         $baseReal = realpath($basePath);
-        if ($baseReal === false || !is_dir($baseReal)) {
+        if ($baseReal === false || !is_dir($baseReal))
+        {
             return $this->json($response, ['error' => 'Uploads directory not available'], 404);
         }
 
         $baseWithSep = $baseReal . DIRECTORY_SEPARATOR;
         $pathWithBase = $baseWithSep . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $requestedPath);
         $resolved = realpath($pathWithBase);
-        if ($resolved === false || !is_file($resolved)) {
+        if ($resolved === false || !is_file($resolved))
+        {
             return $this->json($response, ['error' => 'File not found'], 404);
         }
 
         // Strict directory containment: resolved must be exactly base or under it (prevents e.g. base="uploads" matching "uploads_backup/..")
-        if ($resolved !== $baseReal && strpos($resolved, $baseWithSep) !== 0) {
+        if ($resolved !== $baseReal && strpos($resolved, $baseWithSep) !== 0)
+        {
             return $this->json($response, ['error' => 'Invalid path'], 403);
         }
 
@@ -504,29 +543,33 @@ class FileController extends Controller
         $size = filesize($resolved);
 
         $file = File::where('path', $resolved)->first();
-        if (!$file) {
+        if (!$file)
+        {
             $file = File::create([
-                'owner'   => null,
-                'name'    => $name,
-                'type'    => $extension,
-                'size'    => $size,
-                'path'    => $resolved,
+                'owner' => 1,
+                'name' => $name,
+                'type' => $extension,
+                'size' => $size,
+                'path' => $resolved,
             ]);
         }
 
-        try {
+        try
+        {
             DownloadLog::create([
-                'file_id'    => $file->id,
+                'file_id' => $file->id,
                 'ip_address' => $request->getServerParams()['REMOTE_ADDR'] ?? null,
                 'user_agent' => $request->getHeaderLine('User-Agent') ?: null,
             ]);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e)
+        {
             // Don't block the download
         }
 
         $mimeType = $this->getMimeTypeFromExtension($extension) ?? 'application/octet-stream';
         $response = $response->withHeader('Content-Type', $mimeType);
-        $response = $response->withHeader('Content-Length', (string) $size);
+        $response = $response->withHeader('Content-Length', (string)$size);
         $response = $response->withHeader('Content-Disposition', 'attachment; filename="' . addslashes($name) . '"');
         $response = $response->withHeader('Cache-Control', 'private, max-age=0');
 
