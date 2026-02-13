@@ -18,10 +18,12 @@ fi
 
 # Convert comma-separated SSL_DOMAINS to "-d domain1 -d domain2 ..."
 DOMAIN_FLAGS=""
+OLD_IFS="$IFS"
 IFS=','
 for d in $SSL_DOMAINS; do
   DOMAIN_FLAGS="$DOMAIN_FLAGS -d $d"
 done
+IFS="$OLD_IFS"
 
 FIRST_DOMAIN=$(echo "$SSL_DOMAINS" | cut -d',' -f1)
 

@@ -30,7 +30,7 @@ services:
       - letsencrypt_data:/etc/letsencrypt
       - ./ssl:/ssl
     command: >
-      sh -c "DOMAIN_FLAGS=''; IFS=','; for d in $$SSL_DOMAINS; do DOMAIN_FLAGS=\"$$DOMAIN_FLAGS -d $$d\"; done;
+      sh -c "DOMAIN_FLAGS=''; OLD_IFS=\"$$IFS\"; IFS=','; for d in $$SSL_DOMAINS; do DOMAIN_FLAGS=\"$$DOMAIN_FLAGS -d $$d\"; done; IFS=\"$$OLD_IFS\";
       certbot certonly --standalone $$DOMAIN_FLAGS --email $$SSL_EMAIL
       --agree-tos --non-interactive
       && FIRST_DOMAIN=$$(echo $$SSL_DOMAINS | cut -d',' -f1)
