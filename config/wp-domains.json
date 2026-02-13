@@ -1,0 +1,5 @@
+{
+  "domain1.com": "/var/www/wp-uploads/domain1",
+  "domain2.com": "/var/www/wp-uploads/domain2",
+  "domain3.com": "/var/www/wp-uploads/domain3"
+}

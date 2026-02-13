@@ -7,7 +7,7 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      SSL_DOMAIN: ${SSL_DOMAIN}
+      SSL_DOMAINS: ${SSL_DOMAINS}
       SSL_EMAIL: ${SSL_EMAIL}
     volumes:
       - ./proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
@@ -24,16 +24,18 @@ services:
   certbot-init:
     image: certbot/certbot
     environment:
-      SSL_DOMAIN: ${SSL_DOMAIN}
+      SSL_DOMAINS: ${SSL_DOMAINS}
       SSL_EMAIL: ${SSL_EMAIL}
     volumes:
       - letsencrypt_data:/etc/letsencrypt
       - ./ssl:/ssl
     command: >
-      sh -c "certbot certonly --standalone -d $$SSL_DOMAIN --email $$SSL_EMAIL
+      sh -c "DOMAIN_FLAGS=''; IFS=','; for d in $$SSL_DOMAINS; do DOMAIN_FLAGS=\"$$DOMAIN_FLAGS -d $$d\"; done;
+      certbot certonly --standalone $$DOMAIN_FLAGS --email $$SSL_EMAIL
       --agree-tos --non-interactive
-      && cp /etc/letsencrypt/live/$$SSL_DOMAIN/fullchain.pem /ssl/cert.pem
-      && cp /etc/letsencrypt/live/$$SSL_DOMAIN/privkey.pem /ssl/key.pem"
+      && FIRST_DOMAIN=$$(echo $$SSL_DOMAINS | cut -d',' -f1)
+      && cp /etc/letsencrypt/live/$$FIRST_DOMAIN/fullchain.pem /ssl/cert.pem
+      && cp /etc/letsencrypt/live/$$FIRST_DOMAIN/privkey.pem /ssl/key.pem"
     profiles:
       - ssl-init
 
@@ -43,7 +45,7 @@ services:
       context: ./proxy
       dockerfile: Dockerfile.renew
     environment:
-      SSL_DOMAIN: ${SSL_DOMAIN}
+      SSL_DOMAINS: ${SSL_DOMAINS}
     volumes:
       - letsencrypt_data:/etc/letsencrypt
       - acme_webroot:/var/www/certbot
@@ -71,12 +73,15 @@ services:
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       UPLOAD_URL: ${UPLOAD_URL}
-      WP_UPLOADS_PATH: /var/www/wp-content/uploads
       MAX_FILE_SIZE: ${MAX_FILE_SIZE}
     volumes:
       - ./server:/var/www/html
-      # WordPress uploads: use named volume or bind-mount your existing folder, e.g. ./wp-content/uploads:/var/www/wp-content/uploads
-      - ${WP_UPLOADS_PATH}:/var/www/wp-content/uploads
+      # Domain-to-path config (read by PHP to resolve Host → uploads dir)
+      - ./config/wp-domains.json:/var/www/config/wp-domains.json:ro
+      # WordPress uploads: one bind-mount per domain (paths from .env, targets match config/wp-domains.json)
+      - ${WP_UPLOADS_PATH_1}:/var/www/wp-uploads/domain1
+      - ${WP_UPLOADS_PATH_2}:/var/www/wp-uploads/domain2
+      - ${WP_UPLOADS_PATH_3}:/var/www/wp-uploads/domain3
     depends_on:
       - mysql
 

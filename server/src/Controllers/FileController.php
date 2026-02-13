@@ -14,9 +14,53 @@ class FileController extends Controller
     private const UPLOAD_DIR = __DIR__ . '/../../uploads/';
     private const HASH_SALT = 'your-slsjfos8s8ohs8fhos;8dfs8fs8afoafsp;production'; // Change this to a secure random string
 
-    /** Base path for WordPress wp-content/uploads (set WP_UPLOADS_PATH in env or use default relative path) */
-    private static function getWpUploadsBase(): string
+    /** Cached domain-to-uploads-path map loaded from config/wp-domains.json */
+    private static ?array $wpDomainsMap = null;
+
+    /**
+     * Load the domain → uploads-path mapping from wp-domains.json (cached after first call).
+     */
+    private static function loadWpDomainsMap(): array
     {
+        if (self::$wpDomainsMap === null)
+        {
+            // Mounted into the container at /var/www/config/wp-domains.json
+            $configPath = '/var/www/config/wp-domains.json';
+            if (!is_file($configPath))
+            {
+                // Fallback: relative to project root (local dev without Docker)
+                $configPath = __DIR__ . '/../../config/wp-domains.json';
+            }
+            if (is_file($configPath))
+            {
+                $json = file_get_contents($configPath);
+                self::$wpDomainsMap = json_decode($json, true) ?: [];
+            }
+            else
+            {
+                self::$wpDomainsMap = [];
+            }
+        }
+        return self::$wpDomainsMap;
+    }
+
+    /**
+     * Resolve the WP uploads base directory for the given request host.
+     * Looks up the host in config/wp-domains.json; falls back to WP_UPLOADS_PATH env or default path.
+     */
+    private static function getWpUploadsBase(string $host = ''): string
+    {
+        $map = self::loadWpDomainsMap();
+
+        // Strip port if present (e.g. "domain.com:443" → "domain.com")
+        $domain = strtolower(explode(':', $host)[0]);
+
+        if ($domain !== '' && isset($map[$domain]))
+        {
+            return rtrim($map[$domain], '/\\');
+        }
+
+        // Fallback to single-path env var (backward compatibility)
         $base = getenv('WP_UPLOADS_PATH');
         return $base !== false && $base !== '' ? rtrim($base, '/\\') : (__DIR__ . '/../../wp-content/uploads');
     }
@@ -517,7 +561,8 @@ class FileController extends Controller
             return $this->json($response, ['error' => 'Invalid path'], 400);
         }
 
-        $basePath = self::getWpUploadsBase();
+        $host = $request->getHeaderLine('Host');
+        $basePath = self::getWpUploadsBase($host);
         $baseReal = realpath($basePath);
         if ($baseReal === false || !is_dir($baseReal))
         {
