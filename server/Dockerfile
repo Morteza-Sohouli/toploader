@@ -45,11 +45,16 @@ RUN echo "LimitRequestBody 21474836480" >> /etc/apache2/apache2.conf
 # Install Composer
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
-# Install PHP dependencies and optimize autoloader
+# Install PHP dependencies (used when no volume overrides /var/www/html)
 RUN composer install --no-dev --classmap-authoritative
+
+# Entrypoint: ensure vendor exists at runtime when ./server is bind-mounted (no vendor on host)
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Expose port 80
 EXPOSE 80
 
-# Start Apache
+# Start Apache (invoked by entrypoint after composer install if needed)
 CMD ["apache2-foreground"]
