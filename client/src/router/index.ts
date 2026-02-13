@@ -1,8 +1,10 @@
 import {
   createRouter,
   createWebHistory,
+  createWebHashHistory,
   type RouteRecordRaw,
 } from "vue-router";
+import { Capacitor } from "@capacitor/core";
 import { watch } from "vue";
 import { useAuthStore } from "../store/auth";
 
@@ -33,8 +35,11 @@ const routes: RouteRecordRaw[] = [
   },
 ];
 
+// Use hash history in Capacitor—WebView doesn't handle HTML5 history mode reliably
 const router = createRouter({
-  history: createWebHistory(),
+  history: Capacitor.isNativePlatform()
+    ? createWebHashHistory()
+    : createWebHistory(),
   routes,
 });
 

@@ -16,6 +16,15 @@ use App\Middleware\AdminMiddleware;
 
 if (session_status() === PHP_SESSION_NONE)
 {
+    // Allow session cookie to be sent from Capacitor (cross-origin). Required for mobile app.
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'domain' => '',
+        'secure' => true,
+        'httponly' => true,
+        'samesite' => 'None',
+    ]);
     session_start();
 }
 

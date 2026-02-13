@@ -1,5 +1,5 @@
 <template>
-  <router-view v-if="!isLoading" />
+  <router-view v-if="!isLoading" :key="$route.fullPath" />
   <div
     v-else
     class="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950"
