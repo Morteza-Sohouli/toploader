@@ -74,6 +74,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       UPLOAD_URL: ${UPLOAD_URL}
       MAX_FILE_SIZE: ${MAX_FILE_SIZE}
+      SECURE_LINK_SECRET: ${SECURE_LINK_SECRET}
     volumes:
       - ./server:/var/www/html
       # Domain-to-path config (read by PHP to resolve Host → uploads dir)

@@ -27,6 +27,16 @@ class FileController extends Controller
         return (string) getenv('SECURE_LINK_IP_CHECK') === '1';
     }
 
+    /** Get client IP: X-Real-IP (e.g. from nginx) if present, otherwise REMOTE_ADDR. */
+    private static function getClientIp(Request $request): string
+    {
+        $ip = $request->getHeaderLine('X-Real-IP');
+        if ($ip !== '') {
+            return trim($ip);
+        }
+        return $request->getServerParams()['REMOTE_ADDR'] ?? '';
+    }
+
     /**
      * Build a secure URL with md5 and expires (WordPress/nginx secure_link compatible).
      * Hash: MD5(raw) of "$expires$path2 $secret" or "$expires$path2$userIp $secret", then base64 URL-safe (no padding).
@@ -89,6 +99,22 @@ class FileController extends Controller
         $md5 = strtr($md5, '+/', '-_');
         $md5 = str_replace('=', '', $md5);
         return hash_equals($md5, $providedMd5);
+    }
+
+    /**
+     * Verify secure link for both file serve and WP file serve.
+     * Tries with client IP first; if that fails, tries without IP so links generated without IP
+     * still validate. IP "existence" is thus determined by which md5 hash matches.
+     */
+    private static function verifySecureLinkWithOptionalIp(string $path, string $secret, string $providedMd5, string $expires, string $userIp): bool
+    {
+        if (self::verifySecureLink($path, $secret, $providedMd5, $expires, $userIp)) {
+            return true;
+        }
+        if ($userIp !== '' && self::verifySecureLink($path, $secret, $providedMd5, $expires, '')) {
+            return true;
+        }
+        return false;
     }
 
     /** Cached domain-to-uploads-path map loaded from config/wp-domains.json */
@@ -287,7 +313,7 @@ class FileController extends Controller
                 'download_url' => self::generateSecureFileLink(
                     $fileRecord->id,
                     (string) ($_ENV['UPLOAD_URL'] ?? ''),
-                    $request->getServerParams()['REMOTE_ADDR'] ?? null
+                    self::getClientIp($request) ?: null
                 )
             ]
         ], 201);
@@ -517,7 +543,7 @@ class FileController extends Controller
             ->map(function ($file) use ($user, $request)
             {
                 $baseUrl = (string) ($_ENV['UPLOAD_URL'] ?? '');
-                $userIp = $request->getServerParams()['REMOTE_ADDR'] ?? null;
+                $userIp = self::getClientIp($request) ?: null;
                 return [
                     'id' => $file->id,
                     'filename' => $file->name,
@@ -594,9 +620,9 @@ class FileController extends Controller
 
         $path = '/files/serve/' . $fileId;
         $secret = self::getSecureLinkSecret();
-        $userIp = $request->getServerParams()['REMOTE_ADDR'] ?? '';
+        $userIp = self::getClientIp($request);
 
-        if (!self::verifySecureLink($path, $secret, $providedMd5, $expires, $userIp))
+        if (!self::verifySecureLinkWithOptionalIp($path, $secret, $providedMd5, $expires, $userIp))
         {
             return $this->json($response, ['error' => 'Invalid or expired file access link'], 403);
         }
@@ -620,7 +646,7 @@ class FileController extends Controller
         {
             DownloadLog::create([
                 'file_id' => $file->id,
-                'ip_address' => $request->getServerParams()['REMOTE_ADDR'] ?? null,
+                'ip_address' => self::getClientIp($request) ?: null,
                 'user_agent' => $request->getHeaderLine('User-Agent') ?: null,
             ]);
         }
@@ -650,7 +676,7 @@ class FileController extends Controller
     /**
      * Serve file from wp-content/uploads path. Creates a file record and logs download if not yet in DB.
      * URL pattern: /wp-content/uploads/2026/02/filename.rar or /uploads/2026/02/filename.rar.
-     * If query params md5 and expires are present, they are verified (WordPress/nginx secure_link compatible); otherwise access is allowed without signature.
+     * Requires query params md5 and expires (same as file serve); IP is checked when present via the same optional-IP verification.
      */
     public function serveWpContentFile(Request $request, Response $response, array $args): Response
     {
@@ -669,15 +695,17 @@ class FileController extends Controller
         $params = $request->getQueryParams();
         $providedMd5 = $params['md5'] ?? null;
         $expires = $params['expires'] ?? null;
-        if ($providedMd5 !== null && $providedMd5 !== '' && $expires !== null && $expires !== '')
+        if ($providedMd5 === null || $providedMd5 === '' || $expires === null || $expires === '')
         {
-            $pathForHash = $request->getUri()->getPath();
-            $secret = self::getSecureLinkSecret();
-            $userIp = $request->getServerParams()['REMOTE_ADDR'] ?? '';
-            if (!self::verifySecureLink($pathForHash, $secret, $providedMd5, $expires, $userIp))
-            {
-                return $this->json($response, ['error' => 'Invalid or expired link'], 403);
-            }
+            return $this->json($response, ['error' => 'md5 and expires are required'], 400);
+        }
+
+        $pathForHash = $request->getUri()->getPath();
+        $secret = self::getSecureLinkSecret();
+        $userIp = self::getClientIp($request);
+        if (!self::verifySecureLinkWithOptionalIp($pathForHash, $secret, $providedMd5, $expires, $userIp))
+        {
+            return $this->json($response, ['error' => 'Invalid or expired link'], 403);
         }
 
         $host = $request->getHeaderLine('Host');
@@ -722,7 +750,7 @@ class FileController extends Controller
         {
             DownloadLog::create([
                 'file_id' => $file->id,
-                'ip_address' => $request->getServerParams()['REMOTE_ADDR'] ?? null,
+                'ip_address' => self::getClientIp($request) ?: null,
                 'user_agent' => $request->getHeaderLine('User-Agent') ?: null,
             ]);
         }
