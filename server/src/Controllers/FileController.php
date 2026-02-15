@@ -21,12 +21,6 @@ class FileController extends Controller
         return $v !== false && $v !== '' ? $v : 'xswtvbbny1k';
     }
 
-    /** Whether to bind secure link to client IP (1 = yes, 0 = no). Use env SECURE_LINK_IP_CHECK. */
-    private static function isSecureLinkIpCheck(): bool
-    {
-        return (string) getenv('SECURE_LINK_IP_CHECK') === '1';
-    }
-
     /** Get client IP: X-Real-IP (e.g. from nginx) if present, otherwise REMOTE_ADDR. */
     private static function getClientIp(Request $request): string
     {
@@ -39,23 +33,20 @@ class FileController extends Controller
 
     /**
      * Build a secure URL with md5 and expires (WordPress/nginx secure_link compatible).
-     * Hash: MD5(raw) of "$expires$path2 $secret" or "$expires$path2$userIp $secret", then base64 URL-safe (no padding).
+     * Hash: MD5(raw) of "$expires$path2$userIp $secret", then base64 URL-safe (no padding).
+     * When userIp is non-empty the link is bound to that IP; verification accepts both with-IP and without-IP hashes.
      *
      * @param string $baseUrl Base URL including scheme/host, no trailing slash
      * @param string $path    URI path to protect (e.g. /files/serve/123 or /wp-content/uploads/2026/02/file.rar)
      * @param string $secret  Secret key (e.g. we-protect_sk)
      * @param int    $expire  Expiry Unix timestamp
-     * @param string $userIp  Client IP (only used when IP check is on)
+     * @param string $userIp  Client IP (included in hash when non-empty)
      */
     private static function buildSecureLink(string $baseUrl, string $path, string $secret, int $expire, string $userIp = ''): string
     {
         $path2 = urldecode($path);
         $expires = (string) $expire;
-        if (self::isSecureLinkIpCheck()) {
-            $toHash = $expires . $path2 . $userIp . ' ' . $secret;
-        } else {
-            $toHash = $expires . $path2 . ' ' . $secret;
-        }
+        $toHash = $expires . $path2 . $userIp . ' ' . $secret;
         $md5 = md5($toHash, true);
         $md5 = base64_encode($md5);
         $md5 = strtr($md5, '+/', '-_');
@@ -79,39 +70,35 @@ class FileController extends Controller
     }
 
     /**
-     * Verify md5/expires for a request (same algorithm as buildSecureLink).
-     * Returns true if valid and not expired.
+     * Compute expected md5 token for (path, secret, expires, userIp). Same algorithm as buildSecureLink.
      */
-    private static function verifySecureLink(string $path, string $secret, string $providedMd5, string $expires, string $userIp = ''): bool
+    private static function computeSecureLinkMd5(string $path, string $secret, string $expires, string $userIp): string
+    {
+        $path2 = urldecode($path);
+        $toHash = $expires . $path2 . $userIp . ' ' . $secret;
+        $md5 = md5($toHash, true);
+        $md5 = base64_encode($md5);
+        $md5 = strtr($md5, '+/', '-_');
+        return str_replace('=', '', $md5);
+    }
+
+    /**
+     * Verify secure link for both file serve and WP file serve.
+     * Validity is determined only by md5: we try both the hash computed with client IP and without.
+     * If either matches (and not expired), the link is valid. If neither matches, the link was tampered.
+     */
+    private static function verifySecureLinkWithOptionalIp(string $path, string $secret, string $providedMd5, string $expires, string $userIp): bool
     {
         $expireTs = (int) $expires;
         if ($expireTs < time()) {
             return false;
         }
-        $path2 = urldecode($path);
-        if (self::isSecureLinkIpCheck()) {
-            $toHash = $expires . $path2 . $userIp . ' ' . $secret;
-        } else {
-            $toHash = $expires . $path2 . ' ' . $secret;
-        }
-        $md5 = md5($toHash, true);
-        $md5 = base64_encode($md5);
-        $md5 = strtr($md5, '+/', '-_');
-        $md5 = str_replace('=', '', $md5);
-        return hash_equals($md5, $providedMd5);
-    }
-
-    /**
-     * Verify secure link for both file serve and WP file serve.
-     * Tries with client IP first; if that fails, tries without IP so links generated without IP
-     * still validate. IP "existence" is thus determined by which md5 hash matches.
-     */
-    private static function verifySecureLinkWithOptionalIp(string $path, string $secret, string $providedMd5, string $expires, string $userIp): bool
-    {
-        if (self::verifySecureLink($path, $secret, $providedMd5, $expires, $userIp)) {
+        $expectedWithIp = self::computeSecureLinkMd5($path, $secret, $expires, $userIp);
+        if (hash_equals($expectedWithIp, $providedMd5)) {
             return true;
         }
-        if ($userIp !== '' && self::verifySecureLink($path, $secret, $providedMd5, $expires, '')) {
+        $expectedWithoutIp = self::computeSecureLinkMd5($path, $secret, $expires, '');
+        if (hash_equals($expectedWithoutIp, $providedMd5)) {
             return true;
         }
         return false;
