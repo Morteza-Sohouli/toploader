@@ -13,6 +13,7 @@ use App\Controllers\StatsController;
 use App\Controllers\AdminController;
 use App\Middleware\AuthMiddleware;
 use App\Middleware\AdminMiddleware;
+use App\Middleware\LoginRateLimitMiddleware;
 
 if (session_status() === PHP_SESSION_NONE)
 {
@@ -85,7 +86,7 @@ $app->group('/users', function ($group)
 {
     $group->get('/', [UserController::class, 'index']);
     $group->post('/register', [UserController::class, 'register']);
-    $group->post('/login', [UserController::class, 'login']);
+    $group->post('/login', [UserController::class, 'login'])->add(LoginRateLimitMiddleware::class);
     $group->post('/logout', [UserController::class, 'logout']);
     $group->get('/me', [UserController::class, 'me'])->add(AuthMiddleware::class);
     // $group->get('/{id}', [UserController::class, 'show']);

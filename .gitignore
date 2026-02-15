@@ -13,6 +13,7 @@ dist-ssr
 *.local
 vendor
 server/uploads
+server/storage
 client/android
 
 # Editor directories and files

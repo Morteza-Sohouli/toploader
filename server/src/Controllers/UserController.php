@@ -3,11 +3,17 @@
 namespace App\Controllers;
 
 use App\Models\User;
+use App\Service\LoginRateLimitStore;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 class UserController extends Controller
 {
+    private function getClientIp(Request $request): string
+    {
+        return $request->getServerParams()['REMOTE_ADDR'] ?? '';
+    }
+
     private function index(Request $request, Response $response): Response
     {
         $users = User::all();
@@ -17,7 +23,8 @@ class UserController extends Controller
     private function show(Request $request, Response $response, array $args): Response
     {
         $user = User::find($args['id']);
-        if (!$user) {
+        if (!$user)
+        {
             return $this->json($response, ['error' => 'User not found'], 404);
         }
         return $this->json($response, $user);
@@ -29,16 +36,21 @@ class UserController extends Controller
         $username = $data['username'] ?? '';
         $password = $data['password'] ?? '';
 
-        if (empty($username) || empty($password)) {
+        if (empty($username) || empty($password))
+        {
             return $this->json($response, ['error' => 'Username and password are required'], 400);
         }
 
         $user = User::where('username', $username)->first();
 
-        if (!$user || !password_verify($password, $user->password)) {
+        if (!$user || !password_verify($password, $user->password))
+        {
+            $ip = $this->getClientIp($request);
+            LoginRateLimitStore::recordFailedAttempt($ip);
             return $this->json($response, ['error' => 'Invalid credentials'], 401);
         }
 
+        LoginRateLimitStore::reset($this->getClientIp($request));
         $_SESSION['user_id'] = $user->id;
         $_SESSION['username'] = $user->username;
 
@@ -61,7 +73,8 @@ class UserController extends Controller
     {
 
         $user = User::find($_SESSION['user_id']);
-        if (!$user) {
+        if (!$user)
+        {
             return $this->json($response, ['error' => 'User not found'], 404);
         }
 
@@ -74,11 +87,13 @@ class UserController extends Controller
         $username = $data['username'] ?? '';
         $password = $data['password'] ?? '';
 
-        if (empty($username) || empty($password)) {
+        if (empty($username) || empty($password))
+        {
             return $this->json($response, ['error' => 'Username and password are required'], 400);
         }
 
-        if (User::where('username', $username)->exists()) {
+        if (User::where('username', $username)->exists())
+        {
             return $this->json($response, ['error' => 'User already exists'], 400);
         }
 
