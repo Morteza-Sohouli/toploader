@@ -49,6 +49,7 @@ $app->add(function (Request $request, RequestHandler $handler)
         'http://localhost:3000',
         'https://localhost',
         'http://localhost:5173',
+        'tauri://localhost'
     ]);
     $origin = $request->getHeaderLine('Origin');
     $allowOrigin = in_array($origin, $allowedOrigins, true) ? $origin : null;
