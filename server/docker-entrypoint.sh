@@ -5,7 +5,7 @@ set -e
 # Install dependencies at runtime so vendor/ exists before nginx starts.
 if [ ! -f /var/www/html/vendor/autoload.php ]; then
     echo "vendor/ not found; running composer install..."
-    composer install --no-dev --classmap-authoritative
+    composer install --no-dev
 fi
 
 # Start PHP-FPM in the background (nginx will proxy to 127.0.0.1:9000)

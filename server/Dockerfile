@@ -34,7 +34,7 @@ COPY config/performance.ini /usr/local/etc/php/conf.d/performance.ini
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
 # Install PHP dependencies (used when no volume overrides /var/www/html)
-RUN composer install --no-dev --classmap-authoritative
+RUN composer install --no-dev
 
 # Entrypoint: ensure vendor exists at runtime when ./server is bind-mounted (no vendor on host)
 COPY docker-entrypoint.sh /usr/local/bin/
