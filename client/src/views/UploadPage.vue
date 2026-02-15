@@ -669,7 +669,6 @@ import { useRouter } from "vue-router";
 import { useAuthStore } from "../store/auth";
 import { useThemeStore } from "../store/theme";
 import { fileApi, type UploadedFileInfo, type UserFile } from "../api/files";
-import { API_BASE_URL } from "../api/config";
 
 const router = useRouter();
 const authStore = useAuthStore();

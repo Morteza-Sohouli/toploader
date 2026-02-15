@@ -650,7 +650,6 @@ import {
   type AdminFilesResponse,
   type AdminUsersResponse,
 } from "../api/admin";
-import { API_BASE_URL } from "../api/config";
 
 const router = useRouter();
 const authStore = useAuthStore();
