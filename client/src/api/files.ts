@@ -23,7 +23,8 @@ export interface UserFile {
   file_size_formatted: string;
   mime_type: string;
   file_path: string;
-  hash: string;
+  /** Full secure download URL (md5 + expires). Use this instead of building from hash. */
+  download_url: string;
   created_at: string;
   updated_at: string;
 }

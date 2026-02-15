@@ -100,6 +100,7 @@ $app->group('/files', function ($group)
 })->add(AuthMiddleware::class);
 
 $app->get('/files/serve', [FileController::class, 'serveFile']);
+$app->get('/files/serve/{id}', [FileController::class, 'serveFile']);
 
 // WordPress wp-content/uploads: serve files and log downloads (path e.g. 2026/02/filename.rar)
 $app->get('/wp-content/uploads/{path:.+}', [FileController::class, 'serveWpContentFile']);

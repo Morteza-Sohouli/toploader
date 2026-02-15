@@ -899,7 +899,7 @@ async function executeDelete() {
 
 // ==================== HELPERS ====================
 function getDownloadUrl(file: AdminFile) {
-  return `${API_BASE_URL}/files/serve?id=${file.id}&hash=${file.download_hash}`;
+  return file.download_url;
 }
 
 function formatDate(dateString: string | undefined) {

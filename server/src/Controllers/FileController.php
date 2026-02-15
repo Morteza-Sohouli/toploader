@@ -14,6 +14,83 @@ class FileController extends Controller
     private const UPLOAD_DIR = __DIR__ . '/../../uploads/';
     private const HASH_SALT = 'your-slsjfos8s8ohs8fhos;8dfs8fs8afoafsp;production'; // Change this to a secure random string
 
+    /** Secret for secure link hashing (nginx secure_link / WordPress we-protect compatible). Use env SECURE_LINK_SECRET to match other site. */
+    private static function getSecureLinkSecret(): string
+    {
+        $v = getenv('SECURE_LINK_SECRET');
+        return $v !== false && $v !== '' ? $v : 'xswtvbbny1k';
+    }
+
+    /** Whether to bind secure link to client IP (1 = yes, 0 = no). Use env SECURE_LINK_IP_CHECK. */
+    private static function isSecureLinkIpCheck(): bool
+    {
+        return (string) getenv('SECURE_LINK_IP_CHECK') === '1';
+    }
+
+    /**
+     * Build a secure URL with md5 and expires (WordPress/nginx secure_link compatible).
+     * Hash: MD5(raw) of "$expires$path2 $secret" or "$expires$path2$userIp $secret", then base64 URL-safe (no padding).
+     *
+     * @param string $baseUrl Base URL including scheme/host, no trailing slash
+     * @param string $path    URI path to protect (e.g. /files/serve/123 or /wp-content/uploads/2026/02/file.rar)
+     * @param string $secret  Secret key (e.g. we-protect_sk)
+     * @param int    $expire  Expiry Unix timestamp
+     * @param string $userIp  Client IP (only used when IP check is on)
+     */
+    private static function buildSecureLink(string $baseUrl, string $path, string $secret, int $expire, string $userIp = ''): string
+    {
+        $path2 = urldecode($path);
+        $expires = (string) $expire;
+        if (self::isSecureLinkIpCheck()) {
+            $toHash = $expires . $path2 . $userIp . ' ' . $secret;
+        } else {
+            $toHash = $expires . $path2 . ' ' . $secret;
+        }
+        $md5 = md5($toHash, true);
+        $md5 = base64_encode($md5);
+        $md5 = strtr($md5, '+/', '-_');
+        $md5 = str_replace('=', '', $md5);
+        $url = rtrim($baseUrl, '/') . $path;
+        $sep = strpos($url, '?') !== false ? '&' : '?';
+        return $url . $sep . 'md5=' . $md5 . '&expires=' . $expires;
+    }
+
+    /**
+     * Generate a secure download URL for a file by ID (flows from list/upload).
+     * Uses buildSecureLink with path /files/serve/{id} and default 24h expiry.
+     */
+    public static function generateSecureFileLink(int $fileId, string $baseUrl, ?string $userIp = null): string
+    {
+        $path = '/files/serve/' . $fileId;
+        $secret = self::getSecureLinkSecret();
+        $expire = (int) strtotime('now + 24 hours');
+        $ip = $userIp ?? '';
+        return self::buildSecureLink($baseUrl, $path, $secret, $expire, $ip ?? '');
+    }
+
+    /**
+     * Verify md5/expires for a request (same algorithm as buildSecureLink).
+     * Returns true if valid and not expired.
+     */
+    private static function verifySecureLink(string $path, string $secret, string $providedMd5, string $expires, string $userIp = ''): bool
+    {
+        $expireTs = (int) $expires;
+        if ($expireTs < time()) {
+            return false;
+        }
+        $path2 = urldecode($path);
+        if (self::isSecureLinkIpCheck()) {
+            $toHash = $expires . $path2 . $userIp . ' ' . $secret;
+        } else {
+            $toHash = $expires . $path2 . ' ' . $secret;
+        }
+        $md5 = md5($toHash, true);
+        $md5 = base64_encode($md5);
+        $md5 = strtr($md5, '+/', '-_');
+        $md5 = str_replace('=', '', $md5);
+        return hash_equals($md5, $providedMd5);
+    }
+
     /** Cached domain-to-uploads-path map loaded from config/wp-domains.json */
     private static ?array $wpDomainsMap = null;
 
@@ -207,7 +284,11 @@ class FileController extends Controller
                 'extension' => $fileExtension,
                 'mime_type' => $mimeType,
                 'uploaded_at' => $fileRecord->created_at,
-                'download_url' => $_ENV['UPLOAD_URL'] . '/files/serve?id=' . $fileRecord->id . '&hash=' . hash('sha256', $fileRecord->id . self::HASH_SALT)
+                'download_url' => self::generateSecureFileLink(
+                    $fileRecord->id,
+                    (string) ($_ENV['UPLOAD_URL'] ?? ''),
+                    $request->getServerParams()['REMOTE_ADDR'] ?? null
+                )
             ]
         ], 201);
     }
@@ -433,8 +514,10 @@ class FileController extends Controller
             ->skip($offset)
             ->take($limit)
             ->get()
-            ->map(function ($file) use ($user)
+            ->map(function ($file) use ($user, $request)
             {
+                $baseUrl = (string) ($_ENV['UPLOAD_URL'] ?? '');
+                $userIp = $request->getServerParams()['REMOTE_ADDR'] ?? null;
                 return [
                     'id' => $file->id,
                     'filename' => $file->name,
@@ -443,7 +526,7 @@ class FileController extends Controller
                     'file_size_formatted' => $this->formatBytes($file->size),
                     'mime_type' => $file->type,
                     'file_path' => $file->path,
-                    'hash' => hash('sha256', $file->id . $user->id . self::HASH_SALT),
+                    'download_url' => self::generateSecureFileLink($file->id, $baseUrl, $userIp),
                     'created_at' => $file->created_at,
                     'updated_at' => $file->updated_at,
                 ];
@@ -479,26 +562,43 @@ class FileController extends Controller
     }
 
     /**
-     * Serve file by ID and hash for secure access
+     * Build Content-Disposition header value for download (RFC 5987-aware).
+     * Ensures download managers like IDM get a proper filename.
      */
-    public function serveFile(Request $request, Response $response): Response
+    private function buildContentDisposition(string $filename): string
+    {
+        $escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], $filename);
+        $value = 'attachment; filename="' . $escaped . '"';
+        if (preg_match('/[^\x20-\x7E]/', $filename))
+        {
+            $value .= '; filename*=UTF-8\'\'' . rawurlencode($filename);
+        }
+        return $value;
+    }
+
+    /**
+     * Serve file by ID with secure link (md5 + expires). Compatible with WordPress/nginx secure_link.
+     * URL: /files/serve/{id}?md5=...&expires=... or /files/serve?id=...&md5=...&expires=...
+     */
+    public function serveFile(Request $request, Response $response, array $args = []): Response
     {
         $params = $request->getQueryParams();
-        $fileId = $params['id'] ?? null;
-        $providedHash = $params['hash'] ?? null;
+        $fileId = $args['id'] ?? $params['id'] ?? null;
+        $providedMd5 = $params['md5'] ?? null;
+        $expires = $params['expires'] ?? null;
 
-        if (!$fileId || !$providedHash)
+        if (!$fileId || !$providedMd5 || $expires === null || $expires === '')
         {
-            return $this->json($response, ['error' => 'File ID and hash are required'], 400);
+            return $this->json($response, ['error' => 'File ID, md5 and expires are required'], 400);
         }
 
-        // Generate expected hash using file ID, user ID, and salt
-        $expectedHash = hash('sha256', $fileId . self::HASH_SALT);
+        $path = '/files/serve/' . $fileId;
+        $secret = self::getSecureLinkSecret();
+        $userIp = $request->getServerParams()['REMOTE_ADDR'] ?? '';
 
-        // Verify hash matches
-        if ($expectedHash !== $providedHash)
+        if (!self::verifySecureLink($path, $secret, $providedMd5, $expires, $userIp))
         {
-            return $this->json($response, ['error' => 'Invalid file access hash'], 403);
+            return $this->json($response, ['error' => 'Invalid or expired file access link'], 403);
         }
 
         // Find file by ID
@@ -529,15 +629,19 @@ class FileController extends Controller
             // Silently fail — serving the file is more important than logging
         }
 
-        $mimeType = 'application/octet-stream'; // Default fallback
-        // Set headers for file download
+        $path = $file->path;
+        $size = filesize($path);
+        $extension = strtolower(pathinfo($file->name, PATHINFO_EXTENSION));
+        $mimeType = $this->getMimeTypeFromExtension($extension) ?? 'application/octet-stream';
+
         $response = $response->withHeader('Content-Type', $mimeType);
-        $response = $response->withHeader('Content-Length', filesize($file->path));
-        $response = $response->withHeader('Content-Disposition', 'attachment; filename="' . $file->name . '"');
+        $response = $response->withHeader('Content-Length', (string)$size);
+        $response = $response->withHeader('Content-Disposition', $this->buildContentDisposition($file->name));
+        $response = $response->withHeader('Accept-Ranges', 'bytes');
+        $response = $response->withHeader('Last-Modified', gmdate('D, d M Y H:i:s', filemtime($path)) . ' GMT');
         $response = $response->withHeader('Cache-Control', 'private, max-age=0');
 
-        // Stream the file
-        $stream = fopen($file->path, 'rb');
+        $stream = fopen($path, 'rb');
         $response = $response->withBody(new \Slim\Psr7\Stream($stream));
 
         return $response;
@@ -545,7 +649,8 @@ class FileController extends Controller
 
     /**
      * Serve file from wp-content/uploads path. Creates a file record and logs download if not yet in DB.
-     * URL pattern: /wp-content/uploads/2026/02/filename.rar (query params like md5/expires are ignored).
+     * URL pattern: /wp-content/uploads/2026/02/filename.rar or /uploads/2026/02/filename.rar.
+     * If query params md5 and expires are present, they are verified (WordPress/nginx secure_link compatible); otherwise access is allowed without signature.
      */
     public function serveWpContentFile(Request $request, Response $response, array $args): Response
     {
@@ -559,6 +664,20 @@ class FileController extends Controller
         if (strpos($requestedPath, "\0") !== false)
         {
             return $this->json($response, ['error' => 'Invalid path'], 400);
+        }
+
+        $params = $request->getQueryParams();
+        $providedMd5 = $params['md5'] ?? null;
+        $expires = $params['expires'] ?? null;
+        if ($providedMd5 !== null && $providedMd5 !== '' && $expires !== null && $expires !== '')
+        {
+            $pathForHash = $request->getUri()->getPath();
+            $secret = self::getSecureLinkSecret();
+            $userIp = $request->getServerParams()['REMOTE_ADDR'] ?? '';
+            if (!self::verifySecureLink($pathForHash, $secret, $providedMd5, $expires, $userIp))
+            {
+                return $this->json($response, ['error' => 'Invalid or expired link'], 403);
+            }
         }
 
         $host = $request->getHeaderLine('Host');
@@ -615,7 +734,9 @@ class FileController extends Controller
         $mimeType = $this->getMimeTypeFromExtension($extension) ?? 'application/octet-stream';
         $response = $response->withHeader('Content-Type', $mimeType);
         $response = $response->withHeader('Content-Length', (string)$size);
-        $response = $response->withHeader('Content-Disposition', 'attachment; filename="' . addslashes($name) . '"');
+        $response = $response->withHeader('Content-Disposition', $this->buildContentDisposition($name));
+        $response = $response->withHeader('Accept-Ranges', 'bytes');
+        $response = $response->withHeader('Last-Modified', gmdate('D, d M Y H:i:s', filemtime($resolved)) . ' GMT');
         $response = $response->withHeader('Cache-Control', 'private, max-age=0');
 
         $stream = fopen($resolved, 'rb');

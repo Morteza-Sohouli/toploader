@@ -89,8 +89,10 @@ class AdminController extends Controller
             ->skip($offset)
             ->take($limit)
             ->get()
-            ->map(function ($file) {
+            ->map(function ($file) use ($request) {
                 $owner = User::find($file->owner);
+                $baseUrl = (string) (getenv('UPLOAD_URL') ?: '');
+                $userIp = $request->getServerParams()['REMOTE_ADDR'] ?? null;
                 return [
                     'id' => $file->id,
                     'filename' => $file->name,
@@ -100,7 +102,7 @@ class AdminController extends Controller
                     'owner_id' => $file->owner,
                     'owner_name' => $owner ? $owner->username : 'Unknown',
                     'download_count' => (int) $file->download_count,
-                    'download_hash' => hash('sha256', $file->id . self::HASH_SALT),
+                    'download_url' => FileController::generateSecureFileLink($file->id, $baseUrl, $userIp),
                     'path' => $file->path,
                     'created_at' => $file->created_at,
                     'updated_at' => $file->updated_at,

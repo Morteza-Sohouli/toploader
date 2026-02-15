@@ -11,7 +11,8 @@ export interface AdminFile {
   owner_id: number;
   owner_name: string;
   download_count: number;
-  download_hash: string;
+  /** Full secure download URL (md5 + expires). */
+  download_url: string;
   path: string;
   created_at: string;
   updated_at: string;

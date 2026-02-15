@@ -597,9 +597,7 @@
                 </div>
                 <button
                   @click="
-                    copyToClipboardFromUrl(
-                      `${API_BASE_URL}/files/serve?id=${file.id}&hash=${file.hash}`,
-                    )
+                    copyToClipboardFromUrl(file.download_url)
                   "
                   class="btn-secondary text-xs px-3 py-1 whitespace-nowrap"
                 >
