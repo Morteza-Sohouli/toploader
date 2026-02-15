@@ -1,22 +1,19 @@
-# Use the official PHP image with Apache
-FROM php:8.1-apache
+# Use the official PHP image with FPM (nginx will be installed separately)
+FROM php:8.1-fpm
 
 # Set the working directory
 WORKDIR /var/www/html
 
-# Update Apache configuration to point to public/
-ENV APACHE_DOCUMENT_ROOT /var/www/html/public
-RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf
-RUN sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
-
 # Copy the current directory contents into the container
 COPY . /var/www/html
 
-# Install system dependencies
+# Install system dependencies and nginx
 RUN apt-get update && apt-get install -y \
     git \
     zip \
     unzip \
+    nginx \
+    && rm -rf /var/lib/apt/lists/* \
     && rm -rf /var/www/html/var/cache/*
 
 # Install PHP extensions for MySQL
@@ -33,15 +30,6 @@ RUN echo "upload_max_filesize = 20G" > /usr/local/etc/php/conf.d/uploads.ini \
 # Copy performance configuration
 COPY config/performance.ini /usr/local/etc/php/conf.d/performance.ini
 
-# Enable Apache mod_rewrite and mod_headers
-RUN a2enmod rewrite headers
-
-# Configure Apache to allow .htaccess overrides
-RUN sed -i '/<Directory \/var\/www\/>/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf
-
-# Set LimitRequestBody for 20GB uploads in Apache
-RUN echo "LimitRequestBody 21474836480" >> /etc/apache2/apache2.conf
-
 # Install Composer
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
@@ -56,5 +44,9 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 # Expose port 80
 EXPOSE 80
 
-# Start Apache (invoked by entrypoint after composer install if needed)
-CMD ["apache2-foreground"]
+# nginx config: document root /var/www/html/public, front-controller, 20GB body, long timeouts
+COPY nginx-default.conf /etc/nginx/conf.d/default.conf
+RUN rm -f /etc/nginx/sites-enabled/default
+
+# Start nginx in foreground (PHP-FPM started by entrypoint)
+CMD ["nginx", "-g", "daemon off;"]
