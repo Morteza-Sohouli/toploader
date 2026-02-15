@@ -19,7 +19,7 @@ if (session_status() === PHP_SESSION_NONE)
 {
     // Allow session cookie to be sent from Capacitor (cross-origin). Required for mobile app.
     session_set_cookie_params([
-        'lifetime' => 0,
+        'lifetime' => 60 * 60 * 24 * 365,
         'path' => '/',
         'domain' => '',
         'secure' => true,
