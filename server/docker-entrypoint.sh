@@ -8,6 +8,9 @@ if [ ! -f /var/www/html/vendor/autoload.php ]; then
     composer install --no-dev
 fi
 
+# Regenerate autoload so new classes under src/ are loadable (bind-mount can have newer code than vendor).
+composer dump-autoload --no-dev
+
 # Start PHP-FPM in the background (nginx will proxy to 127.0.0.1:9000)
 php-fpm &
 
