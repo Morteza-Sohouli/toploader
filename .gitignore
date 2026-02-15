@@ -15,7 +15,7 @@ vendor
 server/uploads
 server/storage
 client/android
-
+client/src-tauri
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

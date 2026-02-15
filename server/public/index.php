@@ -48,6 +48,7 @@ $app->add(function (Request $request, RequestHandler $handler)
         $_ENV['UPLOAD_URL'] ?? null,
         'http://localhost:3000',
         'https://localhost',
+        'http://localhost:5173',
     ]);
     $origin = $request->getHeaderLine('Origin');
     $allowOrigin = in_array($origin, $allowedOrigins, true) ? $origin : null;
