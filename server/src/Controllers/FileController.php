@@ -25,7 +25,8 @@ class FileController extends Controller
     private static function getClientIp(Request $request): string
     {
         $ip = $request->getHeaderLine('X-Real-IP');
-        if ($ip !== '') {
+        if ($ip !== '')
+        {
             return trim($ip);
         }
         return $request->getServerParams()['REMOTE_ADDR'] ?? '';
@@ -45,7 +46,7 @@ class FileController extends Controller
     private static function buildSecureLink(string $baseUrl, string $path, string $secret, int $expire, string $userIp = ''): string
     {
         $path2 = urldecode($path);
-        $expires = (string) $expire;
+        $expires = (string)$expire;
         $toHash = $expires . $path2 . $userIp . ' ' . $secret;
         $md5 = md5($toHash, true);
         $md5 = base64_encode($md5);
@@ -64,7 +65,7 @@ class FileController extends Controller
     {
         $path = '/files/serve/' . $fileId;
         $secret = self::getSecureLinkSecret();
-        $expire = (int) strtotime('now + 24 hours');
+        $expire = (int)strtotime('now + 24 hours');
         $ip = $userIp ?? '';
         return self::buildSecureLink($baseUrl, $path, $secret, $expire, $ip ?? '');
     }
@@ -89,16 +90,19 @@ class FileController extends Controller
      */
     private static function verifySecureLinkWithOptionalIp(string $path, string $secret, string $providedMd5, string $expires, string $userIp): bool
     {
-        $expireTs = (int) $expires;
-        if ($expireTs < time()) {
+        $expireTs = (int)$expires;
+        if ($expireTs < time())
+        {
             return false;
         }
         $expectedWithIp = self::computeSecureLinkMd5($path, $secret, $expires, $userIp);
-        if (hash_equals($expectedWithIp, $providedMd5)) {
+        if (hash_equals($expectedWithIp, $providedMd5))
+        {
             return true;
         }
         $expectedWithoutIp = self::computeSecureLinkMd5($path, $secret, $expires, '');
-        if (hash_equals($expectedWithoutIp, $providedMd5)) {
+        if (hash_equals($expectedWithoutIp, $providedMd5))
+        {
             return true;
         }
         return false;
@@ -132,6 +136,15 @@ class FileController extends Controller
             }
         }
         return self::$wpDomainsMap;
+    }
+
+    /**
+     * Sanitize domain for nginx internal location prefix (must match generate-nginx-internal-wp.php).
+     * Used for X-Accel-Redirect: /internal_wp_<sanitized>/...
+     */
+    private static function sanitizeDomainForInternal(string $domain): string
+    {
+        return strtolower(str_replace('.', '_', $domain));
     }
 
     /**
@@ -299,7 +312,7 @@ class FileController extends Controller
                 'uploaded_at' => $fileRecord->created_at,
                 'download_url' => self::generateSecureFileLink(
                     $fileRecord->id,
-                    (string) ($_ENV['UPLOAD_URL'] ?? ''),
+                    (string)($_ENV['UPLOAD_URL'] ?? ''),
                     self::getClientIp($request) ?: null
                 )
             ]
@@ -529,7 +542,7 @@ class FileController extends Controller
             ->get()
             ->map(function ($file) use ($user, $request)
             {
-                $baseUrl = (string) ($_ENV['UPLOAD_URL'] ?? '');
+                $baseUrl = (string)($_ENV['UPLOAD_URL'] ?? '');
                 $userIp = self::getClientIp($request) ?: null;
                 return [
                     'id' => $file->id,
@@ -642,21 +655,24 @@ class FileController extends Controller
             // Silently fail — serving the file is more important than logging
         }
 
-        $path = $file->path;
-        $size = filesize($path);
-        $extension = strtolower(pathinfo($file->name, PATHINFO_EXTENSION));
-        $mimeType = $this->getMimeTypeFromExtension($extension) ?? 'application/octet-stream';
+        // Redirect to nginx internal location so nginx serves the file directly (no PHP streaming)
+        $uploadDirReal = realpath(self::UPLOAD_DIR);
+        if ($uploadDirReal === false || !is_dir($uploadDirReal)) {
+            return $this->json($response, ['error' => 'Uploads directory not available'], 500);
+        }
+        $pathReal = realpath($file->path);
+        if ($pathReal === false || !is_file($pathReal)) {
+            return $this->json($response, ['error' => 'File not found on disk'], 404);
+        }
+        $baseWithSep = $uploadDirReal . DIRECTORY_SEPARATOR;
+        if ($pathReal !== $uploadDirReal && strpos($pathReal, $baseWithSep) !== 0) {
+            return $this->json($response, ['error' => 'Invalid path'], 403);
+        }
+        $relativePath = str_replace([$baseWithSep, '\\'], ['', '/'], $pathReal);
+        $internalUri = '/internal_uploads/' . $relativePath;
 
-        $response = $response->withHeader('Content-Type', $mimeType);
-        $response = $response->withHeader('Content-Length', (string)$size);
-        $response = $response->withHeader('Content-Disposition', $this->buildContentDisposition($file->name));
-        $response = $response->withHeader('Accept-Ranges', 'bytes');
-        $response = $response->withHeader('Last-Modified', gmdate('D, d M Y H:i:s', filemtime($path)) . ' GMT');
-        $response = $response->withHeader('Cache-Control', 'private, max-age=0');
-
-        $stream = fopen($path, 'rb');
-        $response = $response->withBody(new \Slim\Psr7\Stream($stream));
-
+        $response = $response->withHeader('X-Accel-Redirect', $internalUri);
+        $response->getBody()->write('');
         return $response;
     }
 
@@ -746,17 +762,19 @@ class FileController extends Controller
             // Don't block the download
         }
 
-        $mimeType = $this->getMimeTypeFromExtension($extension) ?? 'application/octet-stream';
-        $response = $response->withHeader('Content-Type', $mimeType);
-        $response = $response->withHeader('Content-Length', (string)$size);
-        $response = $response->withHeader('Content-Disposition', $this->buildContentDisposition($name));
-        $response = $response->withHeader('Accept-Ranges', 'bytes');
-        $response = $response->withHeader('Last-Modified', gmdate('D, d M Y H:i:s', filemtime($resolved)) . ' GMT');
-        $response = $response->withHeader('Cache-Control', 'private, max-age=0');
+        // Redirect to nginx internal location (per-domain) so nginx serves the file directly
+        $domain = strtolower(explode(':', $host)[0]);
+        $map = self::loadWpDomainsMap();
+        if ($domain !== '' && isset($map[$domain])) {
+            $prefix = 'internal_wp_' . self::sanitizeDomainForInternal($domain);
+        } else {
+            $prefix = 'internal_wp_default';
+        }
+        $relativePath = str_replace([$baseWithSep, '\\'], ['', '/'], $resolved);
+        $internalUri = '/' . $prefix . '/' . $relativePath;
 
-        $stream = fopen($resolved, 'rb');
-        $response = $response->withBody(new \Slim\Psr7\Stream($stream));
-
+        $response = $response->withHeader('X-Accel-Redirect', $internalUri);
+        $response->getBody()->write('');
         return $response;
     }
 

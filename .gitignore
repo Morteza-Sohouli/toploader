@@ -16,6 +16,7 @@ server/uploads
 server/storage
 client/android
 client/src-tauri
+config/wp-domains.json
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

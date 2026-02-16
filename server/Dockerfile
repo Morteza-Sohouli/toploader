@@ -46,6 +46,8 @@ EXPOSE 80
 
 # nginx config: document root /var/www/html/public, front-controller, 20GB body, long timeouts
 COPY nginx-default.conf /etc/nginx/conf.d/default.conf
+# Internal WP locations (overwritten at runtime by generate-nginx-internal-wp.php from wp-domains.json)
+COPY nginx-internal-wp.conf /etc/nginx/conf.d/internal-wp.conf
 RUN rm -f /etc/nginx/sites-enabled/default
 
 # Start nginx in foreground (PHP-FPM started by entrypoint)
