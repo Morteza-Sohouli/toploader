@@ -672,6 +672,8 @@ class FileController extends Controller
         $internalUri = '/internal_uploads/' . $relativePath;
 
         $response = $response->withHeader('X-Accel-Redirect', $internalUri);
+        $response = $response->withHeader('X-Accel-Buffering', 'no');
+        $response = $response->withHeader('Content-Length', '0');
         $response->getBody()->write('');
         return $response;
     }
@@ -774,6 +776,8 @@ class FileController extends Controller
         $internalUri = '/' . $prefix . '/' . $relativePath;
 
         $response = $response->withHeader('X-Accel-Redirect', $internalUri);
+        $response = $response->withHeader('X-Accel-Buffering', 'no');
+        $response = $response->withHeader('Content-Length', '0');
         $response->getBody()->write('');
         return $response;
     }
