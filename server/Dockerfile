@@ -45,6 +45,8 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 EXPOSE 80
 
 # nginx config: document root /var/www/html/public, front-controller, 20GB body, long timeouts
+# Map for Content-Disposition filename (http context; load first so variable exists)
+COPY nginx-map-disposition.conf /etc/nginx/conf.d/00-map-disposition.conf
 COPY nginx-default.conf /etc/nginx/conf.d/default.conf
 # Internal WP locations in app dir so conf.d/*.conf does not load them at http level; overwritten at runtime by generate-nginx-internal-wp.php
 RUN rm -f /etc/nginx/sites-enabled/default
