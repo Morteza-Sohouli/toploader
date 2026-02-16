@@ -39,6 +39,7 @@ if ($jsonPath !== null) {
             $lines[] = "    location /internal_wp_{$sanitized}/ {";
             $lines[] = "        internal;";
             $lines[] = "        alias {$aliasPath};";
+            $lines[] = "        add_header Content-Disposition 'attachment';";
             $lines[] = "    }";
             $lines[] = "";
         }
@@ -52,6 +53,7 @@ if ($fallback !== false && $fallback !== '') {
     $lines[] = "    location /internal_wp_default/ {";
     $lines[] = "        internal;";
     $lines[] = "        alias {$fallback};";
+    $lines[] = "        add_header Content-Disposition 'attachment';";
     $lines[] = "    }";
     $lines[] = "";
 }
