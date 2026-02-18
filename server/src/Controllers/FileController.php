@@ -255,21 +255,41 @@ class FileController extends Controller
     }
 
     /**
+     * Helper: build a tusd hook rejection response (RejectUpload + HTTPResponse).
+     * tusd v2 expects this format — returning a non-200 HTTP status alone does not reject.
+     */
+    private function tusReject(Response $response, string $message, int $statusCode = 400): Response
+    {
+        return $this->json($response, [
+            'RejectUpload' => true,
+            'HTTPResponse' => [
+                'StatusCode' => $statusCode,
+                'Body' => json_encode(['error' => $message]),
+                'Header' => ['Content-Type' => 'application/json'],
+            ],
+        ]);
+    }
+
+    /**
      * Handle TUS hook events from tusd (pre-create, post-finish).
      */
     public function tusHooks(Request $request, Response $response): Response
     {
-        $body = (string)$request->getBody();
-        $data = json_decode($body, true);
+        // Slim's body parsing middleware may have already consumed the stream,
+        // so prefer getParsedBody(); fall back to reading the raw stream.
+        $data = $request->getParsedBody();
         if (!is_array($data))
         {
-            return $this->json($response, ['error' => 'Invalid hook payload'], 400);
+            $body = (string)$request->getBody();
+            $data = json_decode($body, true);
+        }
+        if (!is_array($data))
+        {
+            return $this->json($response, ['ok' => true]);
         }
 
         $type = $data['Type'] ?? '';
-        $event = $data['Event'] ?? $data;
-
-        $upload = $event['Upload'] ?? $data['Upload'] ?? [];
+        $upload = $data['Event']['Upload'] ?? [];
 
         switch ($type)
         {
@@ -291,37 +311,35 @@ class FileController extends Controller
 
         if ($token === '')
         {
-            return $this->json($response, ['error' => 'Missing upload token'], 403);
+            return $this->tusReject($response, 'Missing upload token', 403);
         }
 
         $payload = self::verifyUploadToken($token);
         if ($payload === null)
         {
-            return $this->json($response, ['error' => 'Invalid or expired upload token'], 403);
+            return $this->tusReject($response, 'Invalid or expired upload token', 403);
         }
 
         if ($uploadSize > ($payload['max_size'] ?? self::MAX_FILE_SIZE))
         {
-            return $this->json($response, ['error' => 'File too large'], 400);
+            return $this->tusReject($response, 'File too large');
         }
 
         if ($uploadSize === 0)
         {
-            return $this->json($response, ['error' => 'File is empty'], 400);
+            return $this->tusReject($response, 'File is empty');
         }
 
         $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
         if ($extension === '')
         {
-            return $this->json($response, ['error' => 'File has no extension'], 400);
+            return $this->tusReject($response, 'File has no extension');
         }
 
         $allowedTypes = $this->parseAllowedFileTypes($payload['allowed_types'] ?? '');
         if (!empty($allowedTypes) && !in_array($extension, $allowedTypes))
         {
-            return $this->json($response, [
-                'error' => 'File type "' . $extension . '" not allowed. Allowed: ' . implode(', ', $allowedTypes)
-            ], 400);
+            return $this->tusReject($response, 'File type "' . $extension . '" not allowed. Allowed: ' . implode(', ', $allowedTypes));
         }
 
         return $this->json($response, ['ok' => true]);
@@ -335,10 +353,15 @@ class FileController extends Controller
         $filename = $metaRaw['filename'] ?? 'unknown';
         $fileSize = (int)($upload['Size'] ?? 0);
 
+        // Use the file path from tusd's Storage info; fall back to constructing it
+        $tusFilePath = $upload['Storage']['Path'] ?? (self::TUS_DATA_DIR . $uploadId);
+        $tusInfoPath = ($upload['Storage']['InfoPath'] ?? '') ?: ($tusFilePath . '.info');
+
         $payload = self::verifyUploadToken($token);
         if ($payload === null)
         {
-            return $this->json($response, ['error' => 'Invalid token in post-finish'], 500);
+            error_log('[TUS post-finish] Invalid token for upload ' . $uploadId);
+            return $this->json($response, ['ok' => true]);
         }
 
         $userId = $payload['user_id'];
@@ -355,26 +378,22 @@ class FileController extends Controller
 
         $targetPath = $datedUploadDir . $sanitizedFilename;
 
-        // tusd stores the file as {upload-id} (no extension) in the tus data dir
-        $tusFilePath = self::TUS_DATA_DIR . $uploadId;
-        $tusInfoPath = $tusFilePath . '.info';
-
         if (!file_exists($tusFilePath))
         {
-            return $this->json($response, ['error' => 'TUS file not found: ' . $uploadId], 500);
+            error_log('[TUS post-finish] File not found at ' . $tusFilePath . ' for upload ' . $uploadId);
+            return $this->json($response, ['ok' => true]);
         }
 
-        // Try rename() first (atomic on same filesystem); fall back to copy+unlink for cross-device
         if (!@rename($tusFilePath, $targetPath))
         {
             if (!copy($tusFilePath, $targetPath))
             {
-                return $this->json($response, ['error' => 'Failed to move file to final location'], 500);
+                error_log('[TUS post-finish] Failed to move ' . $tusFilePath . ' -> ' . $targetPath);
+                return $this->json($response, ['ok' => true]);
             }
             @unlink($tusFilePath);
         }
 
-        // Clean up the .info sidecar
         if (file_exists($tusInfoPath))
         {
             @unlink($tusInfoPath);
@@ -392,17 +411,17 @@ class FileController extends Controller
         }
         catch (\Exception $e)
         {
+            error_log('[TUS post-finish] DB error: ' . $e->getMessage());
             if (file_exists($targetPath))
             {
                 @unlink($targetPath);
             }
-            return $this->json($response, ['error' => 'Failed to save file metadata: ' . $e->getMessage()], 500);
+            return $this->json($response, ['ok' => true]);
         }
 
         $baseUrl = (string)($_ENV['UPLOAD_URL'] ?? '');
         $downloadUrl = self::generateSecureFileLink($fileRecord->id, $baseUrl);
 
-        // Store result so the client can retrieve it
         $resultPath = self::TUS_DATA_DIR . $uploadId . '.result.json';
         file_put_contents($resultPath, json_encode([
             'file_id' => $fileRecord->id,
