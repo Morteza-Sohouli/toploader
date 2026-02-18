@@ -20,6 +20,10 @@ fi
 mkdir -p /data/tus-data
 chown -R 33:33 /data/tus-data
 
+# Session directory (persisted via ./data volume so sessions survive container recreation)
+mkdir -p /data/sessions
+chown -R 33:33 /data/sessions
+
 # Clean up stale TUS partial uploads (older than 24h) every hour
 (
     while true; do
