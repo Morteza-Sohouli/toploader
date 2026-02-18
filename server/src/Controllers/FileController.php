@@ -378,6 +378,7 @@ class FileController extends Controller
 
         $targetPath = $datedUploadDir . $sanitizedFilename;
 
+        clearstatcache(true, $tusFilePath);
         if (!file_exists($tusFilePath))
         {
             // Debug: log what tusd reported and what's actually on disk
