@@ -12,6 +12,7 @@ class FileController extends Controller
 {
     private const MAX_FILE_SIZE = 21474836480; // 20GB in bytes
     private const UPLOAD_DIR = __DIR__ . '/../../uploads/';
+    private const TUS_DATA_DIR = '/data/tus-data/';
     private const HASH_SALT = 'your-slsjfos8s8ohs8fhos;8dfs8fs8afoafsp;production'; // Change this to a secure random string
 
     /** Secret for secure link hashing (nginx secure_link / WordPress we-protect compatible). Use env SECURE_LINK_SECRET to match other site. */
@@ -167,8 +168,302 @@ class FileController extends Controller
         $base = getenv('WP_UPLOADS_PATH');
         return $base !== false && $base !== '' ? rtrim($base, '/\\') : (__DIR__ . '/../../wp-content/uploads');
     }
-    // Note: Ensure PHP configuration supports large uploads:
-    // php.ini: upload_max_filesize=20G, post_max_size=20G, memory_limit=512M, max_execution_time=3600
+    /**
+     * Generate an HMAC-SHA256 signed upload token for TUS uploads.
+     * Token encodes user_id, allowed file types, max size, and expiry.
+     */
+    public function createUploadToken(Request $request, Response $response): Response
+    {
+        $user = User::find($_SESSION['user_id']);
+        if (!$user)
+        {
+            return $this->json($response, ['error' => 'User not found'], 404);
+        }
+
+        $payload = [
+            'user_id' => $user->id,
+            'allowed_types' => $user->allowedFileTypes ?? '',
+            'max_size' => self::MAX_FILE_SIZE,
+            'expires_at' => time() + 90000, // 25 hours
+        ];
+
+        $payloadJson = json_encode($payload);
+        $payloadB64 = rtrim(strtr(base64_encode($payloadJson), '+/', '-_'), '=');
+        $signature = hash_hmac('sha256', $payloadB64, self::getSecureLinkSecret());
+        $token = $payloadB64 . '.' . $signature;
+
+        return $this->json($response, ['token' => $token]);
+    }
+
+    /**
+     * Decode and verify an HMAC-signed upload token. Returns payload array or null.
+     */
+    private static function verifyUploadToken(string $token): ?array
+    {
+        $parts = explode('.', $token, 2);
+        if (count($parts) !== 2)
+        {
+            return null;
+        }
+        [$payloadB64, $signature] = $parts;
+        $expected = hash_hmac('sha256', $payloadB64, self::getSecureLinkSecret());
+        if (!hash_equals($expected, $signature))
+        {
+            return null;
+        }
+        $padded = str_pad(strtr($payloadB64, '-_', '+/'), strlen($payloadB64) + (4 - strlen($payloadB64) % 4) % 4, '=');
+        $json = base64_decode($padded, true);
+        if ($json === false)
+        {
+            return null;
+        }
+        $payload = json_decode($json, true);
+        if (!is_array($payload) || !isset($payload['expires_at']))
+        {
+            return null;
+        }
+        if ($payload['expires_at'] < time())
+        {
+            return null;
+        }
+        return $payload;
+    }
+
+    /**
+     * Decode TUS Upload-Metadata header value (base64-encoded key-value pairs).
+     */
+    private static function parseTusMetadata(string $raw): array
+    {
+        $result = [];
+        foreach (explode(',', $raw) as $pair)
+        {
+            $pair = trim($pair);
+            if ($pair === '')
+            {
+                continue;
+            }
+            $parts = explode(' ', $pair, 2);
+            $key = $parts[0];
+            $value = isset($parts[1]) ? base64_decode($parts[1], true) : '';
+            if ($value === false)
+            {
+                $value = '';
+            }
+            $result[$key] = $value;
+        }
+        return $result;
+    }
+
+    /**
+     * Handle TUS hook events from tusd (pre-create, post-finish).
+     */
+    public function tusHooks(Request $request, Response $response): Response
+    {
+        $body = (string)$request->getBody();
+        $data = json_decode($body, true);
+        if (!is_array($data))
+        {
+            return $this->json($response, ['error' => 'Invalid hook payload'], 400);
+        }
+
+        $type = $data['Type'] ?? '';
+        $event = $data['Event'] ?? $data;
+
+        $upload = $event['Upload'] ?? $data['Upload'] ?? [];
+
+        switch ($type)
+        {
+            case 'pre-create':
+                return $this->tusPreCreate($response, $upload);
+            case 'post-finish':
+                return $this->tusPostFinish($response, $upload);
+            default:
+                return $this->json($response, ['ok' => true]);
+        }
+    }
+
+    private function tusPreCreate(Response $response, array $upload): Response
+    {
+        $metaRaw = $upload['MetaData'] ?? [];
+        $token = $metaRaw['token'] ?? '';
+        $filename = $metaRaw['filename'] ?? '';
+        $uploadSize = (int)($upload['Size'] ?? 0);
+
+        if ($token === '')
+        {
+            return $this->json($response, ['error' => 'Missing upload token'], 403);
+        }
+
+        $payload = self::verifyUploadToken($token);
+        if ($payload === null)
+        {
+            return $this->json($response, ['error' => 'Invalid or expired upload token'], 403);
+        }
+
+        if ($uploadSize > ($payload['max_size'] ?? self::MAX_FILE_SIZE))
+        {
+            return $this->json($response, ['error' => 'File too large'], 400);
+        }
+
+        if ($uploadSize === 0)
+        {
+            return $this->json($response, ['error' => 'File is empty'], 400);
+        }
+
+        $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+        if ($extension === '')
+        {
+            return $this->json($response, ['error' => 'File has no extension'], 400);
+        }
+
+        $allowedTypes = $this->parseAllowedFileTypes($payload['allowed_types'] ?? '');
+        if (!empty($allowedTypes) && !in_array($extension, $allowedTypes))
+        {
+            return $this->json($response, [
+                'error' => 'File type "' . $extension . '" not allowed. Allowed: ' . implode(', ', $allowedTypes)
+            ], 400);
+        }
+
+        return $this->json($response, ['ok' => true]);
+    }
+
+    private function tusPostFinish(Response $response, array $upload): Response
+    {
+        $uploadId = $upload['ID'] ?? '';
+        $metaRaw = $upload['MetaData'] ?? [];
+        $token = $metaRaw['token'] ?? '';
+        $filename = $metaRaw['filename'] ?? 'unknown';
+        $fileSize = (int)($upload['Size'] ?? 0);
+
+        $payload = self::verifyUploadToken($token);
+        if ($payload === null)
+        {
+            return $this->json($response, ['error' => 'Invalid token in post-finish'], 500);
+        }
+
+        $userId = $payload['user_id'];
+        $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION)) ?: 'bin';
+        $sanitizedFilename = $this->generateSafeFilename($filename, $extension);
+
+        $userUploadDir = self::UPLOAD_DIR . $userId . '/';
+        $datePath = date('Y/m/d') . '/';
+        $datedUploadDir = $userUploadDir . $datePath;
+        if (!is_dir($datedUploadDir))
+        {
+            mkdir($datedUploadDir, 0755, true);
+        }
+
+        $targetPath = $datedUploadDir . $sanitizedFilename;
+
+        // tusd stores the file as {upload-id} (no extension) in the tus data dir
+        $tusFilePath = self::TUS_DATA_DIR . $uploadId;
+        $tusInfoPath = $tusFilePath . '.info';
+
+        if (!file_exists($tusFilePath))
+        {
+            return $this->json($response, ['error' => 'TUS file not found: ' . $uploadId], 500);
+        }
+
+        // Try rename() first (atomic on same filesystem); fall back to copy+unlink for cross-device
+        if (!@rename($tusFilePath, $targetPath))
+        {
+            if (!copy($tusFilePath, $targetPath))
+            {
+                return $this->json($response, ['error' => 'Failed to move file to final location'], 500);
+            }
+            @unlink($tusFilePath);
+        }
+
+        // Clean up the .info sidecar
+        if (file_exists($tusInfoPath))
+        {
+            @unlink($tusInfoPath);
+        }
+
+        try
+        {
+            $fileRecord = File::create([
+                'owner' => $userId,
+                'name' => $sanitizedFilename,
+                'type' => $extension,
+                'size' => $fileSize,
+                'path' => $targetPath,
+            ]);
+        }
+        catch (\Exception $e)
+        {
+            if (file_exists($targetPath))
+            {
+                @unlink($targetPath);
+            }
+            return $this->json($response, ['error' => 'Failed to save file metadata: ' . $e->getMessage()], 500);
+        }
+
+        $baseUrl = (string)($_ENV['UPLOAD_URL'] ?? '');
+        $downloadUrl = self::generateSecureFileLink($fileRecord->id, $baseUrl);
+
+        // Store result so the client can retrieve it
+        $resultPath = self::TUS_DATA_DIR . $uploadId . '.result.json';
+        file_put_contents($resultPath, json_encode([
+            'file_id' => $fileRecord->id,
+            'original_name' => $filename,
+            'stored_name' => $sanitizedFilename,
+            'size' => $fileSize,
+            'extension' => $extension,
+            'uploaded_at' => (string)$fileRecord->created_at,
+            'download_url' => $downloadUrl,
+        ]));
+
+        return $this->json($response, ['ok' => true]);
+    }
+
+    /**
+     * Get the result of a completed TUS upload (download URL etc.).
+     * Called by the client after tus-js-client reports success.
+     */
+    public function getTusUploadResult(Request $request, Response $response, array $args): Response
+    {
+        $uploadId = $args['uploadId'] ?? '';
+        if ($uploadId === '' || preg_match('/[^a-zA-Z0-9_+-]/', $uploadId))
+        {
+            return $this->json($response, ['error' => 'Invalid upload ID'], 400);
+        }
+
+        $resultPath = self::TUS_DATA_DIR . $uploadId . '.result.json';
+        if (!file_exists($resultPath))
+        {
+            return $this->json($response, ['error' => 'Upload result not found'], 404);
+        }
+
+        $result = json_decode(file_get_contents($resultPath), true);
+        if (!is_array($result))
+        {
+            return $this->json($response, ['error' => 'Corrupt result file'], 500);
+        }
+
+        // Verify the requesting user owns this file
+        $user = User::find($_SESSION['user_id'] ?? 0);
+        if (!$user)
+        {
+            return $this->json($response, ['error' => 'Unauthorized'], 401);
+        }
+
+        $fileRecord = File::find($result['file_id'] ?? 0);
+        if (!$fileRecord || (int)$fileRecord->owner !== (int)$user->id)
+        {
+            return $this->json($response, ['error' => 'Unauthorized'], 403);
+        }
+
+        // Refresh the download URL with current client IP
+        $baseUrl = (string)($_ENV['UPLOAD_URL'] ?? '');
+        $clientIp = self::getClientIp($request) ?: null;
+        $result['download_url'] = self::generateSecureFileLink($fileRecord->id, $baseUrl, $clientIp);
+
+        // Clean up result file after retrieval
+        @unlink($resultPath);
+
+        return $this->json($response, ['file' => $result]);
+    }
 
     public function upload(Request $request, Response $response): Response
     {

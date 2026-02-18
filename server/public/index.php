@@ -98,9 +98,14 @@ $app->group('/users', function ($group)
 $app->group('/files', function ($group)
 {
     $group->post('/upload', [FileController::class, 'upload']);
+    $group->post('/upload-token', [FileController::class, 'createUploadToken']);
+    $group->get('/tus-result/{uploadId}', [FileController::class, 'getTusUploadResult']);
     $group->get('/valid-mime-types', [FileController::class, 'getValidMimeTypes']);
     $group->get('/uploads', [FileController::class, 'getUserUploads']);
 })->add(AuthMiddleware::class);
+
+// TUS hooks (called internally by tusd, validated via HMAC token)
+$app->post('/tus/hooks', [FileController::class, 'tusHooks']);
 
 $app->get('/files/serve', [FileController::class, 'serveFile']);
 $app->get('/files/serve/{id}', [FileController::class, 'serveFile']);

@@ -155,6 +155,9 @@
               <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 حداکثر حجم: ۲۰ گیگابایت
               </p>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                آپلودها قابل ادامه هستند — حتی بعد از بستن مرورگر تا ۲۴ ساعت
+              </p>
             </div>
 
             <div v-else class="space-y-4">
@@ -277,6 +280,121 @@
             class="mt-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 px-4 py-3 rounded-lg text-sm font-mono whitespace-pre-wrap break-words"
           >
             {{ error }}
+          </div>
+
+          <!-- Pending Uploads (resumable) -->
+          <div v-if="pendingUploads.length > 0" class="mt-8">
+            <h2 class="text-xl font-bold mb-4">آپلودهای ناتمام</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mb-3">
+              این فایل‌ها آپلود کامل نشده‌اند. فایل اصلی را انتخاب کنید تا ادامه
+              آپلود شروع شود.
+            </p>
+            <div class="space-y-3">
+              <div
+                v-for="pending in pendingUploads"
+                :key="pending.id"
+                class="border rounded-lg p-4 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800"
+              >
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-amber-100 dark:bg-amber-800 text-amber-600 dark:text-amber-400"
+                    >
+                      <svg
+                        class="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        ></path>
+                      </svg>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="font-medium text-sm truncate">
+                        {{ pending.filename }}
+                      </p>
+                      <p
+                        class="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1"
+                      >
+                        <span>{{ formatFileSize(pending.size) }}</span>
+                        <span class="mx-1">•</span>
+                        <span>{{ formatTimeAgo(pending.createdAt) }}</span>
+                      </p>
+                      <!-- Resume progress -->
+                      <div
+                        v-if="resumingUploads.has(pending.id)"
+                        class="mt-2 space-y-1"
+                      >
+                        <div class="flex justify-between text-xs">
+                          <span>در حال ادامه آپلود...</span>
+                          <span
+                            >{{
+                              resumeProgress.get(pending.id) ?? 0
+                            }}%</span
+                          >
+                        </div>
+                        <div
+                          class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden"
+                        >
+                          <div
+                            class="bg-amber-500 h-1.5 transition-all duration-300"
+                            :style="{
+                              width:
+                                (resumeProgress.get(pending.id) ?? 0) + '%',
+                            }"
+                          ></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2 flex-shrink-0">
+                    <label
+                      v-if="!resumingUploads.has(pending.id)"
+                      class="btn-primary text-xs px-3 py-1.5 cursor-pointer"
+                    >
+                      ادامه آپلود
+                      <input
+                        type="file"
+                        class="hidden"
+                        @change="(e) => handleResumeFile(e, pending)"
+                      />
+                    </label>
+                    <button
+                      v-if="resumingUploads.has(pending.id)"
+                      @click="cancelResume(pending.id)"
+                      class="btn-secondary text-xs px-3 py-1.5"
+                    >
+                      لغو
+                    </button>
+                    <button
+                      v-if="!resumingUploads.has(pending.id)"
+                      @click="dismissPending(pending.id)"
+                      class="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                      title="حذف"
+                    >
+                      <svg
+                        class="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M6 18L18 6M6 6l12 12"
+                        ></path>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Recent Uploads -->
@@ -412,6 +530,7 @@
                           </p>
                         </div>
                         <div
+                          v-if="upload.fileInfo.download_url"
                           class="mt-3 pt-3 border-t border-green-300 dark:border-green-700"
                         >
                           <p class="font-medium text-xs mb-2">لینک دانلود:</p>
@@ -596,9 +715,7 @@
                   </div>
                 </div>
                 <button
-                  @click="
-                    copyToClipboardFromUrl(file.download_url)
-                  "
+                  @click="copyToClipboardFromUrl(file.download_url)"
                   class="btn-secondary text-xs px-3 py-1 whitespace-nowrap"
                 >
                   لینک دانلود
@@ -664,11 +781,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, reactive } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "../store/auth";
 import { useThemeStore } from "../store/theme";
-import { fileApi, type UploadedFileInfo, type UserFile } from "../api/files";
+import {
+  fileApi,
+  type UploadedFileInfo,
+  type UserFile,
+  type PendingUpload,
+  type TusUploadHandle,
+} from "../api/files";
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -686,7 +809,6 @@ const isUploading = ref(false);
 const isCancelling = ref(false);
 const uploadProgress = ref(0);
 const error = ref("");
-const activeRequests = ref<Map<string, XMLHttpRequest>>(new Map());
 const shouldCancel = ref(false);
 
 interface UploadItem {
@@ -695,16 +817,22 @@ interface UploadItem {
   progress: number;
   uploadedBytes: number;
   totalBytes: number;
-  speed: number; // bytes per second
-  estimatedTime: number; // seconds remaining
+  speed: number;
+  estimatedTime: number;
   status: "uploading" | "completed" | "error";
   startTime: number;
   endTime?: number;
   fileInfo?: UploadedFileInfo;
   error?: string;
+  handle?: TusUploadHandle;
 }
 
 const recentUploads = ref<UploadItem[]>([]);
+const pendingUploads = ref<PendingUpload[]>([]);
+const resumingUploads = reactive(new Set<string>());
+const resumeProgress = reactive(new Map<string, number>());
+const resumeHandles = new Map<string, TusUploadHandle>();
+const activeHandles = ref<TusUploadHandle[]>([]);
 const userFiles = ref<UserFile[]>([]);
 const isLoadingUserFiles = ref(false);
 const currentPage = ref(1);
@@ -795,6 +923,16 @@ const formatDate = (dateString: string | undefined) => {
   }).format(date);
 };
 
+const formatTimeAgo = (timestamp: number): string => {
+  const diff = Date.now() - timestamp;
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "همین الان";
+  if (minutes < 60) return `${minutes} دقیقه پیش`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ساعت پیش`;
+  return "بیش از یک روز پیش";
+};
+
 const validateFile = (file: File): boolean => {
   const extension = file.name.split(".").pop()?.toLowerCase();
 
@@ -803,7 +941,7 @@ const validateFile = (file: File): boolean => {
     return false;
   }
 
-  const maxSize = 20 * 1024 * 1024 * 1024; // 20GB
+  const maxSize = 20 * 1024 * 1024 * 1024;
   if (file.size > maxSize) {
     error.value = "حجم فایل بیش از ۲۰ گیگابایت است";
     return false;
@@ -824,7 +962,6 @@ const handleFileSelect = (event: Event) => {
       if (validateFile(file)) {
         validFiles.push(file);
       } else {
-        // If any file is invalid, stop and show error
         return;
       }
     }
@@ -865,7 +1002,6 @@ const handleDrop = (event: DragEvent) => {
       if (validateFile(file)) {
         validFiles.push(file);
       } else {
-        // If any file is invalid, stop and show error
         return;
       }
     }
@@ -876,10 +1012,8 @@ const handleDrop = (event: DragEvent) => {
 
 const clearFiles = () => {
   if (isUploading.value) {
-    // Cancel all active uploads
     cancelAllUploads();
   } else {
-    // Normal clear when not uploading
     selectedFiles.value = [];
     uploadProgress.value = 0;
     error.value = "";
@@ -893,24 +1027,21 @@ const cancelAllUploads = () => {
   isCancelling.value = true;
   shouldCancel.value = true;
 
-  // Abort all active requests
-  activeRequests.value.forEach((xhr, uploadId) => {
+  for (const handle of activeHandles.value) {
     try {
-      xhr.abort();
-      // Update upload item status to cancelled immediately
+      handle.abort();
       const uploadItem = recentUploads.value.find(
-        (item) => item.id === uploadId,
+        (item) => item.handle?.pendingId === handle.pendingId,
       );
       if (uploadItem && uploadItem.status === "uploading") {
         uploadItem.status = "error";
         uploadItem.error = "آپلود لغو شد";
       }
     } catch (e) {
-      console.warn(`Failed to abort upload ${uploadId}:`, e);
+      console.warn("Failed to abort upload:", e);
     }
-  });
+  }
 
-  // Mark any currently uploading items as cancelled
   recentUploads.value.forEach((item) => {
     if (item.status === "uploading") {
       item.status = "error";
@@ -918,9 +1049,8 @@ const cancelAllUploads = () => {
     }
   });
 
-  activeRequests.value.clear();
+  activeHandles.value = [];
 
-  // Clear UI state
   setTimeout(() => {
     isUploading.value = false;
     isCancelling.value = false;
@@ -930,7 +1060,7 @@ const cancelAllUploads = () => {
     if (fileInput.value) {
       fileInput.value.value = "";
     }
-  }, 500); // Small delay to show cancellation state
+  }, 500);
 };
 
 const removeSelectedFile = (index: number) => {
@@ -948,18 +1078,15 @@ const uploadFiles = async () => {
   isCancelling.value = false;
   shouldCancel.value = false;
   uploadProgress.value = 0;
-  activeRequests.value.clear();
+  activeHandles.value = [];
 
-  const totalFiles = selectedFiles.value.length;
+  const filesToUpload = [...selectedFiles.value];
+  const totalFileCount = filesToUpload.length;
   let completedFiles = 0;
   let hasErrors = false;
 
-  // Upload files sequentially to avoid overwhelming the server
-  for (const file of selectedFiles.value) {
-    // Check if upload should be cancelled
-    if (shouldCancel.value) {
-      break;
-    }
+  for (const file of filesToUpload) {
+    if (shouldCancel.value) break;
 
     const uploadId = `${Date.now()}-${Math.random()}`;
     const startTime = Date.now();
@@ -978,165 +1105,77 @@ const uploadFiles = async () => {
 
     recentUploads.value.unshift(uploadItem);
 
-    // Create a placeholder for cancellation - will be replaced with actual xhr
-    let uploadXhr: XMLHttpRequest | null = null;
-    activeRequests.value.set(uploadId, uploadXhr as any);
-
     try {
-      // Create a promise wrapper that can be cancelled
-      const uploadPromise = fileApi.uploadFile(
+      const handle = await fileApi.startTusUpload(
         file,
         (progress, loaded, total) => {
           if (shouldCancel.value) return;
 
           const currentTime = Date.now();
           const elapsed = (currentTime - startTime) / 1000;
-          const uploadedBytes =
-            loaded || (progress * (total || file.size)) / 100;
 
           uploadItem.progress = progress;
-          uploadItem.uploadedBytes = uploadedBytes;
+          uploadItem.uploadedBytes = loaded;
+          uploadItem.totalBytes = total;
 
           if (elapsed > 0) {
-            uploadItem.speed = uploadedBytes / elapsed;
-            const remainingBytes = (total || file.size) - uploadedBytes;
+            uploadItem.speed = loaded / elapsed;
+            const remainingBytes = total - loaded;
             uploadItem.estimatedTime = remainingBytes / uploadItem.speed;
           }
 
-          // Update overall progress
           const overallProgress =
-            ((completedFiles + progress / 100) / totalFiles) * 100;
+            ((completedFiles + progress / 100) / totalFileCount) * 100;
           uploadProgress.value = Math.round(overallProgress);
+        },
+        (fileInfo) => {
+          if (!shouldCancel.value) {
+            uploadItem.status = "completed";
+            uploadItem.endTime = Date.now();
+            uploadItem.fileInfo = fileInfo;
+            completedFiles++;
+            refreshPendingUploads();
+          }
+        },
+        (uploadError) => {
+          if (!shouldCancel.value) {
+            uploadItem.status = "error";
+            uploadItem.error = uploadError.message;
+            if (uploadError.details) {
+              uploadItem.error += ` - ${uploadError.details}`;
+            }
+            hasErrors = true;
+          }
         },
       );
 
-      const result = await uploadPromise;
+      uploadItem.handle = handle;
+      activeHandles.value.push(handle);
 
-      // Update with actual XMLHttpRequest for future reference
-      if (result.xhr) {
-        uploadXhr = result.xhr;
-        activeRequests.value.set(uploadId, result.xhr);
-      }
-
-      // IMPORTANT: Check if cancelled BEFORE processing result
-      // This prevents overwriting cancellation status with success
-      if (shouldCancel.value || uploadItem.status === "error") {
-        // Don't overwrite if already marked as cancelled
-        if (uploadItem.status !== "error") {
-          uploadItem.status = "error";
-          uploadItem.error = "آپلود لغو شد";
-        }
-        activeRequests.value.delete(uploadId);
-        break;
-      }
-
-      if (result.success && result.data) {
-        // Double-check we haven't been cancelled while processing
-        if (shouldCancel.value) {
-          uploadItem.status = "error";
-          uploadItem.error = "آپلود لغو شد";
-        } else {
-          uploadItem.status = "completed";
-          uploadItem.endTime = Date.now();
-          uploadItem.fileInfo = result.data.file;
-          completedFiles++;
-        }
-      } else if (result.error) {
-        uploadItem.status = "error";
-        uploadItem.error = result.error.message;
-        hasErrors = true;
-
-        // Build comprehensive error message only if not cancelled
-        if (result.error.type !== "abort" && !shouldCancel.value) {
-          const err = result.error;
-          const errorParts: string[] = [];
-
-          const errorTypeLabels: Record<string, string> = {
-            network: "🌐 Network Error",
-            timeout: "⏱️ Timeout",
-            offline: "📡 Offline",
-            abort: "🚫 Aborted",
-            server: "🖥️ Server Error",
-            parse: "⚠️ Parse Error",
-            unknown: "❓ Unknown Error",
-          };
-
-          const typeLabel =
-            errorTypeLabels[err.type] || errorTypeLabels["unknown"];
-          errorParts.push(`[${typeLabel}] ${file.name}`);
-
-          if (err.statusCode) {
-            errorParts.push(`HTTP ${err.statusCode}`);
+      // Wait for this upload to finish before starting the next
+      await new Promise<void>((resolve) => {
+        const checkDone = setInterval(() => {
+          if (
+            uploadItem.status === "completed" ||
+            uploadItem.status === "error" ||
+            shouldCancel.value
+          ) {
+            clearInterval(checkDone);
+            resolve();
           }
-
-          errorParts.push(err.message);
-
-          if (err.details) {
-            errorParts.push(`\n📋 Details: ${err.details}`);
-          }
-
-          if ((err as any).originalError) {
-            const origErr = (err as any).originalError as any;
-            if (origErr.name) {
-              errorParts.push(`\n🔍 Error Type: ${origErr.name}`);
-            }
-            if (origErr.code) {
-              errorParts.push(`\n🔢 Error Code: ${origErr.code}`);
-            }
-            if (origErr.message && origErr.message !== err.message) {
-              errorParts.push(`\n💬 Original Message: ${origErr.message}`);
-            }
-          }
-
-          if (!error.value) {
-            error.value = errorParts.join(" ");
-          } else {
-            error.value += "\n\n" + errorParts.join(" ");
-          }
-        }
-      }
-
-      // Remove from active requests when done
-      activeRequests.value.delete(uploadId);
+        }, 500);
+      });
     } catch (err: any) {
       uploadItem.status = "error";
       uploadItem.error = err.message || "خطای نامشخص";
       hasErrors = true;
-
-      // Only show error details if not cancelled
-      if (!shouldCancel.value) {
-        const errorParts = [`❌ Unexpected Error for ${file.name}`];
-
-        if (err.name) {
-          errorParts.push(`\n🔍 Type: ${err.name}`);
-        }
-        if (err.message) {
-          errorParts.push(`\n💬 Message: ${err.message}`);
-        }
-        if (err.code) {
-          errorParts.push(`\n🔢 Code: ${err.code}`);
-        }
-
-        if (!error.value) {
-          error.value = errorParts.join(" ");
-        } else {
-          error.value += "\n\n" + errorParts.join(" ");
-        }
-      }
-
-      // Remove from active requests when done
-      activeRequests.value.delete(uploadId);
     }
   }
 
-  // Clear active requests
-  activeRequests.value.clear();
+  activeHandles.value = [];
 
-  // Final progress update
   if (!shouldCancel.value) {
     uploadProgress.value = 100;
-
-    // Clear selected files if all uploads completed successfully
     if (!hasErrors) {
       selectedFiles.value = [];
       if (fileInput.value) {
@@ -1144,13 +1183,89 @@ const uploadFiles = async () => {
       }
     }
   } else {
-    // If cancelled, show appropriate message
     error.value = "آپلود توسط کاربر لغو شد";
   }
 
   isUploading.value = false;
   isCancelling.value = false;
   shouldCancel.value = false;
+};
+
+const handleResumeFile = async (event: Event, pending: PendingUpload) => {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+
+  if (file.name !== pending.filename || file.size !== pending.size) {
+    showNotification(
+      "فایل انتخاب شده با فایل اصلی مطابقت ندارد. لطفاً همان فایل را انتخاب کنید.",
+      "error",
+    );
+    target.value = "";
+    return;
+  }
+
+  resumingUploads.add(pending.id);
+  resumeProgress.set(pending.id, 0);
+
+  const handle = fileApi.resumeTusUpload(
+    file,
+    pending,
+    (_progress, loaded, total) => {
+      const pct = Math.round((loaded / total) * 100);
+      resumeProgress.set(pending.id, pct);
+    },
+    (fileInfo) => {
+      resumingUploads.delete(pending.id);
+      resumeProgress.delete(pending.id);
+      resumeHandles.delete(pending.id);
+
+      recentUploads.value.unshift({
+        id: `resume-${Date.now()}`,
+        file,
+        progress: 100,
+        uploadedBytes: file.size,
+        totalBytes: file.size,
+        speed: 0,
+        estimatedTime: 0,
+        status: "completed",
+        startTime: Date.now(),
+        endTime: Date.now(),
+        fileInfo,
+      });
+
+      refreshPendingUploads();
+      showNotification("آپلود با موفقیت تکمیل شد", "success");
+    },
+    (uploadError) => {
+      resumingUploads.delete(pending.id);
+      resumeProgress.delete(pending.id);
+      resumeHandles.delete(pending.id);
+      showNotification(uploadError.message, "error");
+    },
+  );
+
+  resumeHandles.set(pending.id, handle);
+  target.value = "";
+};
+
+const cancelResume = (pendingId: string) => {
+  const handle = resumeHandles.get(pendingId);
+  if (handle) {
+    handle.abort();
+  }
+  resumingUploads.delete(pendingId);
+  resumeProgress.delete(pendingId);
+  resumeHandles.delete(pendingId);
+};
+
+const dismissPending = (id: string) => {
+  fileApi.removePendingUpload(id);
+  refreshPendingUploads();
+};
+
+const refreshPendingUploads = () => {
+  pendingUploads.value = fileApi.getPendingUploads();
 };
 
 const removeUpload = (uploadId: string) => {
@@ -1165,7 +1280,6 @@ const copyToClipboardFromUrl = async (url: string) => {
     await navigator.clipboard.writeText(url);
     showNotification("لینک دانلود در کلیپ‌بورد کپی شد", "success");
   } catch (err) {
-    // Fallback for older browsers
     const textArea = document.createElement("textarea");
     textArea.value = url;
     document.body.appendChild(textArea);
@@ -1181,7 +1295,6 @@ const showNotification = (
   type: "success" | "error" = "success",
 ) => {
   notification.value = { message, type };
-  // Auto-hide after 3 seconds
   setTimeout(() => {
     notification.value = null;
   }, 3000);
@@ -1253,6 +1366,8 @@ const goToPrevPage = async () => {
 };
 
 onMounted(() => {
+  fileApi.cleanExpiredPendingUploads();
+  refreshPendingUploads();
   fetchUserFiles();
 });
 </script>
