@@ -170,7 +170,7 @@ export const fileApi = {
 
     const upload = new tus.Upload(file, {
       endpoint: TUS_ENDPOINT,
-      chunkSize: 100 * 1024 * 1024, // 100MB -- HDD friendly
+      chunkSize: 5 * 1024 * 1024 * 1024, // 5GB upload buffer
       retryDelays: [0, 3000, 5000, 10000, 20000],
       metadata: {
         filename: file.name,
