@@ -179,7 +179,7 @@ export const fileApi = {
       },
       storeFingerprintForResuming: true,
       removeFingerprintOnSuccess: true,
-      fingerprint: (_file, _options) => Promise.resolve(fingerprint),
+      fingerprint: (_file: any, _options: any) => Promise.resolve(fingerprint),
       withCredentials: true,
 
       onProgress: (bytesUploaded: number, bytesTotal: number) => {
@@ -213,7 +213,7 @@ export const fileApi = {
         });
       },
 
-      onError: (err: tus.DetailedError) => {
+      onError: (err: any) => {
         if (err.message?.includes("tus: upload was aborted")) {
           onError?.({
             type: "abort",
@@ -288,7 +288,7 @@ export const fileApi = {
           }
         }
       },
-    });
+    }as any);
 
     const handle: TusUploadHandle = {
       upload,
@@ -300,7 +300,7 @@ export const fileApi = {
 
     upload.findPreviousUploads().then((previousUploads) => {
       if (previousUploads.length > 0) {
-        upload.resumeFromPreviousUpload(previousUploads[0]);
+        upload.resumeFromPreviousUpload(previousUploads[0] as tus.PreviousUpload);
       }
       upload.start();
     });
@@ -326,10 +326,9 @@ export const fileApi = {
       },
       storeFingerprintForResuming: true,
       removeFingerprintOnSuccess: true,
-      fingerprint: (_file, _options) =>
+      fingerprint: (_file: any, _options: any) =>
         Promise.resolve(pendingUpload.fingerprint),
       uploadUrl: pendingUpload.tusUrl || undefined,
-      withCredentials: true,
 
       onProgress: (bytesUploaded: number, bytesTotal: number) => {
         const pct = Math.round((bytesUploaded / bytesTotal) * 100);
@@ -362,7 +361,7 @@ export const fileApi = {
         });
       },
 
-      onError: (err: tus.DetailedError) => {
+      onError: (err: any) => {
         if (!navigator.onLine) {
           onError?.({
             type: "offline",
@@ -377,7 +376,7 @@ export const fileApi = {
           details: err.message || "",
         });
       },
-    });
+    } as any);
 
     const handle: TusUploadHandle = {
       upload,
@@ -389,7 +388,7 @@ export const fileApi = {
 
     upload.findPreviousUploads().then((previousUploads) => {
       if (previousUploads.length > 0) {
-        upload.resumeFromPreviousUpload(previousUploads[0]);
+        upload.resumeFromPreviousUpload(previousUploads[0] as tus.PreviousUpload);
       }
       upload.start();
     });
