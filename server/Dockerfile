@@ -1,25 +1,20 @@
 # Use the official PHP image with FPM (nginx will be installed separately)
 FROM php:8.1-fpm
 
-# Set the working directory
 WORKDIR /var/www/html
 
-# Copy the current directory contents into the container
-COPY . /var/www/html
-
-# Install system dependencies and nginx
+# System deps and nginx (cached unless base image or this block changes)
 RUN apt-get update && apt-get install -y \
     git \
     zip \
     unzip \
     nginx \
-    && rm -rf /var/lib/apt/lists/* \
-    && rm -rf /var/www/html/var/cache/*
+    && rm -rf /var/lib/apt/lists/*
 
-# Install PHP extensions for MySQL
+# PHP extensions for MySQL (cached)
 RUN docker-php-ext-install mysqli pdo pdo_mysql
 
-# Configure PHP for large file uploads (20GB)
+# PHP upload limits (20GB)
 RUN echo "upload_max_filesize = 20G" > /usr/local/etc/php/conf.d/uploads.ini \
     && echo "post_max_size = 21G" >> /usr/local/etc/php/conf.d/uploads.ini \
     && echo "memory_limit = 1G" >> /usr/local/etc/php/conf.d/uploads.ini \
@@ -27,29 +22,27 @@ RUN echo "upload_max_filesize = 20G" > /usr/local/etc/php/conf.d/uploads.ini \
     && echo "max_input_time = 3600" >> /usr/local/etc/php/conf.d/uploads.ini \
     && echo "file_uploads = On" >> /usr/local/etc/php/conf.d/uploads.ini
 
-# Copy performance configuration
-COPY config/performance.ini /usr/local/etc/php/conf.d/performance.ini
-
-# Install Composer
+# Composer binary (cached)
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
-# Install PHP dependencies (used when no volume overrides /var/www/html)
+# Install PHP deps first so this layer is cached when only app code changes
+COPY composer.json composer.lock ./
 RUN composer install --no-dev
 
-# Entrypoint: ensure vendor exists at runtime when ./server is bind-mounted (no vendor on host)
+# App code (vendor excluded via .dockerignore so previous layer's vendor is kept)
+COPY . /var/www/html
+
+# Clear cache if present in copied tree
+RUN rm -rf /var/www/html/var/cache/* 2>/dev/null || true
+
+# PHP and nginx config (system paths)
+COPY config/performance.ini /usr/local/etc/php/conf.d/performance.ini
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-ENTRYPOINT ["docker-entrypoint.sh"]
-
-# Expose port 80
-EXPOSE 80
-
-# nginx config: document root /var/www/html/public, front-controller, 20GB body, long timeouts
-# Map for Content-Disposition filename (http context; load first so variable exists)
 COPY nginx-map-disposition.conf /etc/nginx/conf.d/00-map-disposition.conf
 COPY nginx-default.conf /etc/nginx/conf.d/default.conf
-# Internal WP locations in app dir so conf.d/*.conf does not load them at http level; overwritten at runtime by generate-nginx-internal-wp.php
 RUN rm -f /etc/nginx/sites-enabled/default
 
-# Start nginx in foreground (PHP-FPM started by entrypoint)
+ENTRYPOINT ["docker-entrypoint.sh"]
+EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]

@@ -1,0 +1,22 @@
+# Dependencies (installed in image; avoid sending 2000+ files)
+vendor
+
+# Runtime/cache and uploads (not needed in image when using bind mounts)
+var
+uploads
+
+# Version control and IDE
+.git
+.gitignore
+.vscode
+*.md
+
+# Local env and OS
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# Docker (avoid recursive copy)
+Dockerfile
+.dockerignore
