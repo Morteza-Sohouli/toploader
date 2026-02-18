@@ -17,6 +17,7 @@ services:
     depends_on:
       - client
       - server
+      - tusd
     restart: unless-stopped
 
   # Optional one-off if you prefer to get cert before starting proxy (e.g. proxy not yet built):
@@ -72,7 +73,6 @@ services:
       - -hooks-http-forward-headers=Cookie
       - -hooks-enabled-events=pre-create,post-finish
       - -max-size=21474836480
-      - -upload-expiration=24h
     volumes:
       - ./data:/data
     depends_on:

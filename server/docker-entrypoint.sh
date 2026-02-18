@@ -16,6 +16,14 @@ if [ -f /var/www/html/scripts/generate-nginx-internal-wp.php ]; then
     php /var/www/html/scripts/generate-nginx-internal-wp.php || true
 fi
 
+# Clean up stale TUS partial uploads (older than 24h) every hour
+(
+    while true; do
+        sleep 3600
+        find /data/tus-data -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null || true
+    done
+) &
+
 # Start PHP-FPM in the background (nginx will proxy to 127.0.0.1:9000)
 php-fpm &
 
