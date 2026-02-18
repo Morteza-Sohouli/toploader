@@ -16,6 +16,10 @@ if [ -f /var/www/html/scripts/generate-nginx-internal-wp.php ]; then
     php /var/www/html/scripts/generate-nginx-internal-wp.php || true
 fi
 
+# Ensure TUS data directory exists and is writable by www-data (UID 33)
+mkdir -p /data/tus-data
+chown -R 33:33 /data/tus-data
+
 # Clean up stale TUS partial uploads (older than 24h) every hour
 (
     while true; do

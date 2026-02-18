@@ -65,6 +65,7 @@ services:
 
   tusd:
     image: tusproject/tusd:latest
+    user: "33:33"
     command:
       - -behind-proxy
       - -base-path=/tus/
