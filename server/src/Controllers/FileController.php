@@ -380,7 +380,12 @@ class FileController extends Controller
 
         if (!file_exists($tusFilePath))
         {
+            // Debug: log what tusd reported and what's actually on disk
+            $storageInfo = json_encode($upload['Storage'] ?? 'no Storage key');
+            $dirListing = is_dir(self::TUS_DATA_DIR) ? implode(', ', array_slice(scandir(self::TUS_DATA_DIR), 0, 20)) : 'DIR NOT FOUND';
             error_log('[TUS post-finish] File not found at ' . $tusFilePath . ' for upload ' . $uploadId);
+            error_log('[TUS post-finish] Storage info: ' . $storageInfo);
+            error_log('[TUS post-finish] /data/tus-data/ listing: ' . $dirListing);
             return $this->json($response, ['ok' => true]);
         }
 
