@@ -378,26 +378,22 @@ class FileController extends Controller
 
         $targetPath = $datedUploadDir . $sanitizedFilename;
 
-        clearstatcache(true, $tusFilePath);
-        if (!file_exists($tusFilePath))
+        // Skip file_exists() — PHP's realpath/stat cache is unreliable for files
+        // created by external processes. Just attempt the move directly.
+        $moved = @rename($tusFilePath, $targetPath);
+        if (!$moved)
         {
-            // Debug: log what tusd reported and what's actually on disk
-            $storageInfo = json_encode($upload['Storage'] ?? 'no Storage key');
-            $dirListing = is_dir(self::TUS_DATA_DIR) ? implode(', ', array_slice(scandir(self::TUS_DATA_DIR), 0, 20)) : 'DIR NOT FOUND';
-            error_log('[TUS post-finish] File not found at ' . $tusFilePath . ' for upload ' . $uploadId);
-            error_log('[TUS post-finish] Storage info: ' . $storageInfo);
-            error_log('[TUS post-finish] /data/tus-data/ listing: ' . $dirListing);
-            return $this->json($response, ['ok' => true]);
+            $moved = @copy($tusFilePath, $targetPath);
+            if ($moved)
+            {
+                @unlink($tusFilePath);
+            }
         }
 
-        if (!@rename($tusFilePath, $targetPath))
+        if (!$moved)
         {
-            if (!copy($tusFilePath, $targetPath))
-            {
-                error_log('[TUS post-finish] Failed to move ' . $tusFilePath . ' -> ' . $targetPath);
-                return $this->json($response, ['ok' => true]);
-            }
-            @unlink($tusFilePath);
+            error_log('[TUS post-finish] Failed to move ' . $tusFilePath . ' -> ' . $targetPath . ' error: ' . error_get_last()['message'] ?? 'unknown');
+            return $this->json($response, ['ok' => true]);
         }
 
         if (file_exists($tusInfoPath))
