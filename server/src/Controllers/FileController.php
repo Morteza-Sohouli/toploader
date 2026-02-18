@@ -588,6 +588,75 @@ class FileController extends Controller
     }
 
     /**
+     * Render a beautiful Persian HTML error page for file-serving errors.
+     * SEO-friendly with proper meta, lang, and semantic structure.
+     */
+    private function renderErrorPage(Response $response, int $statusCode, string $title, string $description, string $hint = ''): Response
+    {
+        $statusMessages = [
+            400 => 'درخواست نامعتبر',
+            403 => 'عدم دسترسی',
+            404 => 'صفحه‌ایافت نشد',
+            500 => 'خطای سرور',
+        ];
+        $statusLabel = $statusMessages[$statusCode] ?? 'خطا';
+        $html = '<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="' . htmlspecialchars($description, ENT_QUOTES, 'UTF-8') . '">
+    <title>' . htmlspecialchars($title . ' | ' . $statusLabel, ENT_QUOTES, 'UTF-8') . '</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: "Vazirmatn", "Tahoma", sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: #e8e8e8;
+            padding: 1.5rem;
+            line-height: 1.7;
+        }
+        .card {
+            max-width: 480px;
+            width: 100%;
+            background: rgba(255,255,255,0.05);
+            border-radius: 1.25rem;
+            padding: 2rem;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.08);
+            text-align: center;
+        }
+        .icon { font-size: 3.5rem; margin-bottom: 1rem; opacity: 0.9; }
+        h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.75rem; }
+        p { font-size: 1rem; color: #b8b8b8; margin-bottom: 1rem; }
+        .hint { font-size: 0.9rem; color: #8892a6; margin-top: 1rem; }
+        .status { display: inline-block; background: rgba(239,68,68,0.2); color: #fca5a5; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.85rem; margin-bottom: 1.25rem; }
+    </style>
+</head>
+<body>
+    <main class="card" role="main">
+        <div class="status" aria-hidden="true">' . htmlspecialchars($statusLabel, ENT_QUOTES, 'UTF-8') . '</div>
+        <div class="icon" aria-hidden="true">⚠️</div>
+        <h1>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</h1>
+        <p>' . htmlspecialchars($description, ENT_QUOTES, 'UTF-8') . '</p>
+        ' . ($hint !== '' ? '<p class="hint">' . htmlspecialchars($hint, ENT_QUOTES, 'UTF-8') . '</p>' : '') . '
+    </main>
+</body>
+</html>';
+        $response->getBody()->write($html);
+        return $response
+            ->withHeader('Content-Type', 'text/html; charset=UTF-8')
+            ->withStatus($statusCode);
+    }
+
+    /**
      * Build Content-Disposition header value for download (RFC 5987-aware).
      * Ensures download managers like IDM get a proper filename.
      */
@@ -615,7 +684,10 @@ class FileController extends Controller
 
         if (!$fileId || !$providedMd5 || $expires === null || $expires === '')
         {
-            return $this->json($response, ['error' => 'File ID, md5 and expires are required'], 400);
+            return $this->renderErrorPage($response, 400,
+                'لینک دانلود ناقص است',
+                'برای دانلود فایل، لینک کامل با پارامترهای امنیتی لازم است. لطفاً وارد حساب خود در تاپ جی اس ام شوید و دوباره روی دانلود کلیک کنید.',
+                'اگر از صفحهٔ سایت به اینجا آمده‌اید، لینک ممکن است نادرست کپی شده باشد.');
         }
 
         $path = '/files/serve/' . $fileId;
@@ -624,21 +696,29 @@ class FileController extends Controller
 
         if (!self::verifySecureLinkWithOptionalIp($path, $secret, $providedMd5, $expires, $userIp))
         {
-            return $this->json($response, ['error' => 'Invalid or expired file access link'], 403);
+            return $this->renderErrorPage($response, 403,
+                'لینک دانلود منقضی یا نامعتبر است',
+                'این لینک دیگر قابل استفاده نیست. لینک‌های دانلود پس از مدتی منقضی می‌شوند.',
+                'لطفاً دوباره از صفحهٔ دانلود ها، لینک دانلود جدید بگیرید.');
         }
 
         // Find file by ID
         $file = File::find($fileId);
         if (!$file)
         {
-            return $this->json($response, ['error' => 'File not found'], 404);
+            return $this->renderErrorPage($response, 404,
+                'فایل یافت نشد',
+                'فایلی با این شناسه در سیستم وجود ندارد. ممکن است فایل حذف شده یا شناسه اشتباه باشد.',
+                'لطفا با پشتیبانی تماس بگیرید');
         }
-
 
         // Check if file exists on disk
         if (!file_exists($file->path))
         {
-            return $this->json($response, ['error' => 'File not found on disk'], 404);
+            return $this->renderErrorPage($response, 404,
+                'فایل روی دیسک یافت نشد',
+                'رکورد فایل موجود است اما فایل فیزیکی روی سرور پیدا نشد. احتمالاً فایل حذف یا جابجا شده است.',
+                'لطفا با پشتیبانی تماس بگیرید');
         }
 
         // Log the download (don't let logging failure block the download)
@@ -657,16 +737,28 @@ class FileController extends Controller
 
         // Redirect to nginx internal location so nginx serves the file directly (no PHP streaming)
         $uploadDirReal = realpath(self::UPLOAD_DIR);
-        if ($uploadDirReal === false || !is_dir($uploadDirReal)) {
-            return $this->json($response, ['error' => 'Uploads directory not available'], 500);
+        if ($uploadDirReal === false || !is_dir($uploadDirReal))
+        {
+            return $this->renderErrorPage($response, 500,
+                'پوشهٔ آپلود در دسترس نیست',
+                'سرور نمی‌تواند به پوشهٔ فایل‌های آپلود شده دسترسی پیدا کند. این مشکل موقتی است.',
+                'لطفاً چند دقیقه بعد دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.');
         }
         $pathReal = realpath($file->path);
-        if ($pathReal === false || !is_file($pathReal)) {
-            return $this->json($response, ['error' => 'File not found on disk'], 404);
+        if ($pathReal === false || !is_file($pathReal))
+        {
+            return $this->renderErrorPage($response, 404,
+                'فایل روی دیسک یافت نشد',
+                'فایل فیزیکی در مسیر ذخیره‌سازی پیدا نشد. ممکن است حذف یا منتقل شده باشد.',
+                'لطفا با پشتیبانی تماس بگیرید');
         }
         $baseWithSep = $uploadDirReal . DIRECTORY_SEPARATOR;
-        if ($pathReal !== $uploadDirReal && strpos($pathReal, $baseWithSep) !== 0) {
-            return $this->json($response, ['error' => 'Invalid path'], 403);
+        if ($pathReal !== $uploadDirReal && strpos($pathReal, $baseWithSep) !== 0)
+        {
+            return $this->renderErrorPage($response, 403,
+                'مسیر فایل معتبر نیست',
+                'مسیر فایل خارج از محدودهٔ مجاز است. تلاش برای دسترسی غیرمجاز شناسایی شد.',
+                'لطفا با پشتیبانی تماس بگیرید');
         }
         $relativePath = str_replace([$baseWithSep, '\\'], ['', '/'], $pathReal);
         $internalUri = '/internal_uploads/' . $relativePath;
@@ -688,13 +780,19 @@ class FileController extends Controller
         $requestedPath = $args['path'] ?? '';
         if ($requestedPath === '')
         {
-            return $this->json($response, ['error' => 'Path required'], 400);
+            return $this->renderErrorPage($response, 400,
+                'مسیر فایل مشخص نشده',
+                'آدرس فایل برای دانلود ارسال نشده است. لطفاً از لینک اصلی سایت استفاده کنید.',
+                'اگر از جای دیگری این لینک را کپی کرده‌اید، لینک ناقص است.');
         }
 
         // Reject null bytes (directory injection / legacy PHP path issues)
         if (strpos($requestedPath, "\0") !== false)
         {
-            return $this->json($response, ['error' => 'Invalid path'], 400);
+            return $this->renderErrorPage($response, 400,
+                'مسیر فایل نامعتبر است',
+                'آدرس درخواستی شامل کاراکترهای غیرمجاز است و قابل پردازش نیست.',
+                'لطفاً از لینک صحیح صفحهٔ سایت استفاده کنید.');
         }
 
         $params = $request->getQueryParams();
@@ -702,7 +800,10 @@ class FileController extends Controller
         $expires = $params['expires'] ?? null;
         if ($providedMd5 === null || $providedMd5 === '' || $expires === null || $expires === '')
         {
-            return $this->json($response, ['error' => 'md5 and expires are required'], 400);
+            return $this->renderErrorPage($response, 400,
+                'لینک دانلود ناقص است',
+                'برای دانلود فایل، پارامترهای امنیتی (md5 و expires) لازم است. لطفاً از صفحهٔ اصلی سایت لینک بگیرید.',
+                'وارد اکانت خود در تاپ جی اس ام شوید و دوباره روی دانلود کلیک کنید.');
         }
 
         $pathForHash = $request->getUri()->getPath();
@@ -710,7 +811,10 @@ class FileController extends Controller
         $userIp = self::getClientIp($request);
         if (!self::verifySecureLinkWithOptionalIp($pathForHash, $secret, $providedMd5, $expires, $userIp))
         {
-            return $this->json($response, ['error' => 'Invalid or expired link'], 403);
+            return $this->renderErrorPage($response, 403,
+                'لینک دانلود منقضی یا نامعتبر است',
+                'این لینک امنیتی دیگر معتبر نیست یا منقضی شده. لینک‌های محافظت‌شده پس از مدتی غیرفعال می‌شوند.',
+                'وارد اکانت خود در تاپ جی اس ام شوید و دوباره روی دانلود کلیک کنید.');
         }
 
         $host = $request->getHeaderLine('Host');
@@ -718,7 +822,10 @@ class FileController extends Controller
         $baseReal = realpath($basePath);
         if ($baseReal === false || !is_dir($baseReal))
         {
-            return $this->json($response, ['error' => 'Uploads directory not available'], 404);
+            return $this->renderErrorPage($response, 404,
+                'پوشهٔ آپلود در دسترس نیست',
+                'پوشهٔ ذخیرهٔ فایل‌های وردپرس برای این دامنه یافت نشد یا قابل دسترسی نیست.',
+                'لطفا با پشتیبانی تماس بگیرید');
         }
 
         $baseWithSep = $baseReal . DIRECTORY_SEPARATOR;
@@ -726,13 +833,19 @@ class FileController extends Controller
         $resolved = realpath($pathWithBase);
         if ($resolved === false || !is_file($resolved))
         {
-            return $this->json($response, ['error' => 'File not found'], 404);
+            return $this->renderErrorPage($response, 404,
+                'فایل یافت نشد',
+                'فایل درخواستی در مسیر آپلودها وجود ندارد. ممکن است فایل حذف شده یا آدرس اشتباه باشد.',
+                'لطفا با پشتیبانی تماس بگیرید');
         }
 
         // Strict directory containment: resolved must be exactly base or under it (prevents e.g. base="uploads" matching "uploads_backup/..")
         if ($resolved !== $baseReal && strpos($resolved, $baseWithSep) !== 0)
         {
-            return $this->json($response, ['error' => 'Invalid path'], 403);
+            return $this->renderErrorPage($response, 403,
+                'مسیر فایل معتبر نیست',
+                'مسیر فراتر از محدودهٔ مجاز آپلودها است. دسترسی غیرمجاز تشخیص داده شد.',
+                'لطفا با پشتیبانی تماس بگیرید');
         }
 
         $name = basename($resolved);
@@ -767,9 +880,12 @@ class FileController extends Controller
         // Redirect to nginx internal location (per-domain) so nginx serves the file directly
         $domain = strtolower(explode(':', $host)[0]);
         $map = self::loadWpDomainsMap();
-        if ($domain !== '' && isset($map[$domain])) {
+        if ($domain !== '' && isset($map[$domain]))
+        {
             $prefix = 'internal_wp_' . self::sanitizeDomainForInternal($domain);
-        } else {
+        }
+        else
+        {
             $prefix = 'internal_wp_default';
         }
         $relativePath = str_replace([$baseWithSep, '\\'], ['', '/'], $resolved);
