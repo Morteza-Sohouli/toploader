@@ -105,6 +105,7 @@ class AdminController extends Controller
                     'download_count' => (int) $file->download_count,
                     'download_url' => SecureLinkService::generateSecureFileLink($file->id, $baseUrl, $userIp),
                     'path' => $file->path,
+                    'host' => $file->host ?? null,
                     'created_at' => $file->created_at,
                     'updated_at' => $file->updated_at,
                 ];

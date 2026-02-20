@@ -338,6 +338,7 @@
                   <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">نوع</th>
                   <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">حجم</th>
                   <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">دانلودها</th>
+                  <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">میزبان</th>
                   <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">مالک</th>
                   <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">تاریخ</th>
                   <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">عملیات</th>
@@ -356,6 +357,7 @@
                   </td>
                   <td class="py-3 px-2 text-gray-600 dark:text-gray-400">{{ file.size_formatted }}</td>
                   <td class="py-3 px-2 text-gray-600 dark:text-gray-400">{{ file.download_count }}</td>
+                  <td class="py-3 px-2 text-gray-600 dark:text-gray-400 max-w-[10rem] truncate" :title="file.host || ''">{{ file.host || '—' }}</td>
                   <td class="py-3 px-2">{{ file.owner_name }}</td>
                   <td class="py-3 px-2 text-gray-500 text-xs">{{ formatDate(file.created_at) }}</td>
                   <td class="py-3 px-2">

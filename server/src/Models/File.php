@@ -14,6 +14,7 @@ class File extends Model
         'type',
         'size',
         'path',
+        'host',
     ];
 
     protected $casts = [

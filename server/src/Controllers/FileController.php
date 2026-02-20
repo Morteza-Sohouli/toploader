@@ -511,6 +511,7 @@ class FileController extends Controller
         }
 
         // Save file metadata to database
+        $host = $request->getHeaderLine('Host');
         try
         {
             $fileRecord = File::create([
@@ -519,6 +520,7 @@ class FileController extends Controller
                 'type' => $fileExtension,
                 'size' => $fileSize,
                 'path' => $targetPath,
+                'host' => $host !== '' ? $host : null,
             ]);
         }
         catch (\Exception $e)
@@ -990,6 +992,7 @@ class FileController extends Controller
                 'type' => $extension,
                 'size' => $size,
                 'path' => $resolved,
+                'host' => $host !== '' ? $host : null,
             ]);
         }
 
