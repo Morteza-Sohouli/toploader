@@ -39,13 +39,18 @@ final class SecureLinkService
 
     /**
      * Generate a secure download URL for a file by ID (default 24h expiry).
+     * Optional $fileName is appended as a query param so clients can see the file name in the link.
      */
-    public static function generateSecureFileLink(int $fileId, string $baseUrl, ?string $userIp = null): string
+    public static function generateSecureFileLink(int $fileId, string $baseUrl, ?string $userIp = null, ?string $fileName = null): string
     {
         $path = '/files/serve/' . $fileId;
         $expire = (int) strtotime('now + 24 hours');
         $ip = $userIp ?? '';
-        return self::buildSecureLink($baseUrl, $path, $expire, $ip);
+        $url = self::buildSecureLink($baseUrl, $path, $expire, $ip);
+        if ($fileName !== null && $fileName !== '') {
+            $url .= '&fileName=' . rawurlencode($fileName);
+        }
+        return $url;
     }
 
     /**

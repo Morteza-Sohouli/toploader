@@ -109,7 +109,7 @@ class AdminController extends Controller
                     'owner_id' => $file->owner,
                     'owner_name' => $owner ? $owner->username : 'Unknown',
                     'download_count' => (int) $file->download_count,
-                    'download_url' => SecureLinkService::generateSecureFileLink($file->id, $baseUrl, $userIp),
+                    'download_url' => SecureLinkService::generateSecureFileLink($file->id, $baseUrl, $userIp, $file->name),
                     'path' => $file->path,
                     'host' => $file->host ?? null,
                     'created_at' => $file->created_at,

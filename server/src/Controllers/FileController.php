@@ -22,9 +22,9 @@ class FileController extends Controller
      * Generate a secure download URL for a file by ID (flows from list/upload).
      * Delegates to SecureLinkService for compatibility with AdminController and external callers.
      */
-    public static function generateSecureFileLink(int $fileId, string $baseUrl, ?string $userIp = null): string
+    public static function generateSecureFileLink(int $fileId, string $baseUrl, ?string $userIp = null, ?string $fileName = null): string
     {
-        return SecureLinkService::generateSecureFileLink($fileId, $baseUrl, $userIp);
+        return SecureLinkService::generateSecureFileLink($fileId, $baseUrl, $userIp, $fileName);
     }
 
     /** Cached domain-to-uploads-path map loaded from config/wp-domains.json */
@@ -340,7 +340,7 @@ class FileController extends Controller
         }
 
         $baseUrl = (string)($_ENV['UPLOAD_URL'] ?? '');
-        $downloadUrl = SecureLinkService::generateSecureFileLink($fileRecord->id, $baseUrl);
+        $downloadUrl = SecureLinkService::generateSecureFileLink($fileRecord->id, $baseUrl, null, $filename);
 
         $resultPath = self::TUS_DATA_DIR . $uploadId . '.result.json';
         file_put_contents($resultPath, json_encode([
@@ -396,7 +396,8 @@ class FileController extends Controller
         // Refresh the download URL with current client IP
         $baseUrl = (string)($_ENV['UPLOAD_URL'] ?? '');
         $clientIp = RequestHelper::getClientIp($request) ?: null;
-        $result['download_url'] = SecureLinkService::generateSecureFileLink($fileRecord->id, $baseUrl, $clientIp);
+        $fileName = $result['original_name'] ?? $fileRecord->name;
+        $result['download_url'] = SecureLinkService::generateSecureFileLink($fileRecord->id, $baseUrl, $clientIp, $fileName);
 
         // Clean up result file after retrieval
         @unlink($resultPath);
@@ -549,7 +550,8 @@ class FileController extends Controller
                 'download_url' => SecureLinkService::generateSecureFileLink(
                     $fileRecord->id,
                     (string)($_ENV['UPLOAD_URL'] ?? ''),
-                    RequestHelper::getClientIp($request) ?: null
+                    RequestHelper::getClientIp($request) ?: null,
+                    $filename
                 )
             ]
         ], 201);
@@ -698,7 +700,7 @@ class FileController extends Controller
                     'file_size_formatted' => FormatHelper::formatBytes($file->size),
                     'mime_type' => $file->type,
                     'file_path' => $file->path,
-                    'download_url' => SecureLinkService::generateSecureFileLink($file->id, $baseUrl, $userIp),
+                    'download_url' => SecureLinkService::generateSecureFileLink($file->id, $baseUrl, $userIp, $file->name),
                     'created_at' => $file->created_at,
                     'updated_at' => $file->updated_at,
                 ];
