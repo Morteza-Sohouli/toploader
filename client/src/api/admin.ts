@@ -14,6 +14,7 @@ export interface AdminFile {
   /** Full secure download URL (md5 + expires). */
   download_url: string;
   path: string;
+  host: string | null;
   created_at: string;
   updated_at: string;
 }
