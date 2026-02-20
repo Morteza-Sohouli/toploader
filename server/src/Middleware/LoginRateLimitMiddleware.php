@@ -3,6 +3,7 @@
 namespace App\Middleware;
 
 use App\Service\LoginRateLimitStore;
+use App\Util\RequestHelper;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Server\MiddlewareInterface;
@@ -11,14 +12,9 @@ use Slim\Psr7\Response as SlimResponse;
 
 class LoginRateLimitMiddleware implements MiddlewareInterface
 {
-    private static function getClientIp(Request $request): string
-    {
-        return $request->getServerParams()['REMOTE_ADDR'] ?? '';
-    }
-
     public function process(Request $request, RequestHandlerInterface $handler): Response
     {
-        $ip = self::getClientIp($request);
+        $ip = RequestHelper::getClientIp($request);
 
         if (LoginRateLimitStore::isBlocked($ip))
         {

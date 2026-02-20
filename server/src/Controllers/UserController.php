@@ -4,16 +4,12 @@ namespace App\Controllers;
 
 use App\Models\User;
 use App\Service\LoginRateLimitStore;
+use App\Util\RequestHelper;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 class UserController extends Controller
 {
-    private function getClientIp(Request $request): string
-    {
-        return $request->getServerParams()['REMOTE_ADDR'] ?? '';
-    }
-
     private function index(Request $request, Response $response): Response
     {
         $users = User::all();
@@ -45,12 +41,12 @@ class UserController extends Controller
 
         if (!$user || !password_verify($password, $user->password))
         {
-            $ip = $this->getClientIp($request);
+            $ip = RequestHelper::getClientIp($request);
             LoginRateLimitStore::recordFailedAttempt($ip);
             return $this->json($response, ['error' => 'Invalid credentials'], 401);
         }
 
-        LoginRateLimitStore::reset($this->getClientIp($request));
+        LoginRateLimitStore::reset(RequestHelper::getClientIp($request));
         $_SESSION['user_id'] = $user->id;
         $_SESSION['username'] = $user->username;
 

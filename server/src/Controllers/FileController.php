@@ -5,6 +5,10 @@ namespace App\Controllers;
 use App\Models\User;
 use App\Models\File;
 use App\Models\DownloadLog;
+use App\Service\MimeTypeMap;
+use App\Service\SecureLinkService;
+use App\Util\FormatHelper;
+use App\Util\RequestHelper;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -13,100 +17,14 @@ class FileController extends Controller
     private const MAX_FILE_SIZE = 21474836480; // 20GB in bytes
     private const UPLOAD_DIR = __DIR__ . '/../../uploads/';
     private const TUS_DATA_DIR = '/data/tus-data/';
-    private const HASH_SALT = 'your-slsjfos8s8ohs8fhos;8dfs8fs8afoafsp;production'; // Change this to a secure random string
-
-    /** Secret for secure link hashing (nginx secure_link / WordPress we-protect compatible). Use env SECURE_LINK_SECRET to match other site. */
-    private static function getSecureLinkSecret(): string
-    {
-        $v = getenv('SECURE_LINK_SECRET');
-        return $v !== false && $v !== '' ? $v : 'xswtvbbny1k';
-    }
-
-    /** Get client IP: X-Real-IP (e.g. from nginx) if present, otherwise REMOTE_ADDR. */
-    private static function getClientIp(Request $request): string
-    {
-        $ip = $request->getHeaderLine('X-Real-IP');
-        if ($ip !== '')
-        {
-            return trim($ip);
-        }
-        return $request->getServerParams()['REMOTE_ADDR'] ?? '';
-    }
-
-    /**
-     * Build a secure URL with md5 and expires (WordPress/nginx secure_link compatible).
-     * Hash: MD5(raw) of "$expires$path2$userIp $secret", then base64 URL-safe (no padding).
-     * When userIp is non-empty the link is bound to that IP; verification accepts both with-IP and without-IP hashes.
-     *
-     * @param string $baseUrl Base URL including scheme/host, no trailing slash
-     * @param string $path    URI path to protect (e.g. /files/serve/123 or /wp-content/uploads/2026/02/file.rar)
-     * @param string $secret  Secret key (e.g. we-protect_sk)
-     * @param int    $expire  Expiry Unix timestamp
-     * @param string $userIp  Client IP (included in hash when non-empty)
-     */
-    private static function buildSecureLink(string $baseUrl, string $path, string $secret, int $expire, string $userIp = ''): string
-    {
-        $path2 = urldecode($path);
-        $expires = (string)$expire;
-        $toHash = $expires . $path2 . $userIp . ' ' . $secret;
-        $md5 = md5($toHash, true);
-        $md5 = base64_encode($md5);
-        $md5 = strtr($md5, '+/', '-_');
-        $md5 = str_replace('=', '', $md5);
-        $url = rtrim($baseUrl, '/') . $path;
-        $sep = strpos($url, '?') !== false ? '&' : '?';
-        return $url . $sep . 'md5=' . $md5 . '&expires=' . $expires;
-    }
 
     /**
      * Generate a secure download URL for a file by ID (flows from list/upload).
-     * Uses buildSecureLink with path /files/serve/{id} and default 24h expiry.
+     * Delegates to SecureLinkService for compatibility with AdminController and external callers.
      */
     public static function generateSecureFileLink(int $fileId, string $baseUrl, ?string $userIp = null): string
     {
-        $path = '/files/serve/' . $fileId;
-        $secret = self::getSecureLinkSecret();
-        $expire = (int)strtotime('now + 24 hours');
-        $ip = $userIp ?? '';
-        return self::buildSecureLink($baseUrl, $path, $secret, $expire, $ip ?? '');
-    }
-
-    /**
-     * Compute expected md5 token for (path, secret, expires, userIp). Same algorithm as buildSecureLink.
-     */
-    private static function computeSecureLinkMd5(string $path, string $secret, string $expires, string $userIp): string
-    {
-        $path2 = urldecode($path);
-        $toHash = $expires . $path2 . $userIp . ' ' . $secret;
-        $md5 = md5($toHash, true);
-        $md5 = base64_encode($md5);
-        $md5 = strtr($md5, '+/', '-_');
-        return str_replace('=', '', $md5);
-    }
-
-    /**
-     * Verify secure link for both file serve and WP file serve.
-     * Validity is determined only by md5: we try both the hash computed with client IP and without.
-     * If either matches (and not expired), the link is valid. If neither matches, the link was tampered.
-     */
-    private static function verifySecureLinkWithOptionalIp(string $path, string $secret, string $providedMd5, string $expires, string $userIp): bool
-    {
-        $expireTs = (int)$expires;
-        if ($expireTs < time())
-        {
-            return false;
-        }
-        $expectedWithIp = self::computeSecureLinkMd5($path, $secret, $expires, $userIp);
-        if (hash_equals($expectedWithIp, $providedMd5))
-        {
-            return true;
-        }
-        $expectedWithoutIp = self::computeSecureLinkMd5($path, $secret, $expires, '');
-        if (hash_equals($expectedWithoutIp, $providedMd5))
-        {
-            return true;
-        }
-        return false;
+        return SecureLinkService::generateSecureFileLink($fileId, $baseUrl, $userIp);
     }
 
     /** Cached domain-to-uploads-path map loaded from config/wp-domains.json */
@@ -189,7 +107,7 @@ class FileController extends Controller
 
         $payloadJson = json_encode($payload);
         $payloadB64 = rtrim(strtr(base64_encode($payloadJson), '+/', '-_'), '=');
-        $signature = hash_hmac('sha256', $payloadB64, self::getSecureLinkSecret());
+        $signature = hash_hmac('sha256', $payloadB64, SecureLinkService::getHmacSecret());
         $token = $payloadB64 . '.' . $signature;
 
         return $this->json($response, ['token' => $token]);
@@ -206,7 +124,7 @@ class FileController extends Controller
             return null;
         }
         [$payloadB64, $signature] = $parts;
-        $expected = hash_hmac('sha256', $payloadB64, self::getSecureLinkSecret());
+        $expected = hash_hmac('sha256', $payloadB64, SecureLinkService::getHmacSecret());
         if (!hash_equals($expected, $signature))
         {
             return null;
@@ -422,7 +340,7 @@ class FileController extends Controller
         }
 
         $baseUrl = (string)($_ENV['UPLOAD_URL'] ?? '');
-        $downloadUrl = self::generateSecureFileLink($fileRecord->id, $baseUrl);
+        $downloadUrl = SecureLinkService::generateSecureFileLink($fileRecord->id, $baseUrl);
 
         $resultPath = self::TUS_DATA_DIR . $uploadId . '.result.json';
         file_put_contents($resultPath, json_encode([
@@ -477,8 +395,8 @@ class FileController extends Controller
 
         // Refresh the download URL with current client IP
         $baseUrl = (string)($_ENV['UPLOAD_URL'] ?? '');
-        $clientIp = self::getClientIp($request) ?: null;
-        $result['download_url'] = self::generateSecureFileLink($fileRecord->id, $baseUrl, $clientIp);
+        $clientIp = RequestHelper::getClientIp($request) ?: null;
+        $result['download_url'] = SecureLinkService::generateSecureFileLink($fileRecord->id, $baseUrl, $clientIp);
 
         // Clean up result file after retrieval
         @unlink($resultPath);
@@ -519,7 +437,7 @@ class FileController extends Controller
         if ($fileSize > self::MAX_FILE_SIZE)
         {
             return $this->json($response, [
-                'error' => 'File size exceeds maximum allowed size of ' . ($this->formatBytes(self::MAX_FILE_SIZE))
+                'error' => 'File size exceeds maximum allowed size of ' . (FormatHelper::formatBytes(self::MAX_FILE_SIZE))
             ], 400);
         }
 
@@ -548,7 +466,7 @@ class FileController extends Controller
 
         // Additional MIME type validation for extra security
         $mimeType = $uploadedFile->getClientMediaType();
-        if (!$this->isValidMimeType($mimeType, $fileExtension))
+        if (!MimeTypeMap::isValidMimeType($mimeType, $fileExtension))
         {
             return $this->json($response, [
                 'error' => 'File MIME type does not match extension'
@@ -626,10 +544,10 @@ class FileController extends Controller
                 'extension' => $fileExtension,
                 'mime_type' => $mimeType,
                 'uploaded_at' => $fileRecord->created_at,
-                'download_url' => self::generateSecureFileLink(
+                'download_url' => SecureLinkService::generateSecureFileLink(
                     $fileRecord->id,
                     (string)($_ENV['UPLOAD_URL'] ?? ''),
-                    self::getClientIp($request) ?: null
+                    RequestHelper::getClientIp($request) ?: null
                 )
             ]
         ], 201);
@@ -671,59 +589,6 @@ class FileController extends Controller
     }
 
     /**
-     * Validate MIME type matches file extension
-     */
-    private function isValidMimeType(?string $mimeType, string $extension): bool
-    {
-        // Common MIME type mappings
-        $mimeMap = [
-            'jpg' => ['image/jpeg', 'image/jpg'],
-            'jpeg' => ['image/jpeg', 'image/jpg'],
-            'png' => ['image/png'],
-            'gif' => ['image/gif'],
-            'bmp' => ['image/bmp', 'image/x-bmp'],
-            'tiff' => ['image/tiff', 'image/x-tiff'],
-            'svg' => ['image/svg+xml'],
-            'webp' => ['image/webp'],
-            'pdf' => ['application/pdf'],
-            'doc' => ['application/msword'],
-            'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-            'xls' => ['application/vnd.ms-excel'],
-            'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
-            'ppt' => ['application/vnd.ms-powerpoint'],
-            'pptx' => ['application/vnd.openxmlformats-officedocument.presentationml.presentation'],
-            'odt' => ['application/vnd.oasis.opendocument.text'],
-            'rtf' => ['application/rtf', 'text/rtf'],
-            'txt' => ['text/plain'],
-            'csv' => ['text/csv', 'text/plain', 'application/csv'],
-            'json' => ['application/json'],
-            'xml' => ['application/xml', 'text/xml'],
-            'html' => ['text/html'],
-            'zip' => ['application/zip', 'application/x-zip-compressed'],
-            'rar' => ['application/vnd.rar', 'application/x-rar-compressed', 'application/x-rar', 'application/octet-stream', 'application/x-compressed'],
-            '7z' => ['application/x-7z-compressed'],
-            'tar' => ['application/x-tar'],
-            'gz' => ['application/gzip', 'application/x-gzip'],
-            'mp4' => ['video/mp4'],
-            'avi' => ['video/x-msvideo', 'video/avi'],
-            'mov' => ['video/quicktime'],
-            'wmv' => ['video/x-ms-wmv'],
-            'mp3' => ['audio/mpeg'],
-            'wav' => ['audio/wav', 'audio/x-wav'],
-            'flac' => ['audio/flac'],
-            'aac' => ['audio/aac'],
-        ];
-
-        if (!isset($mimeMap[$extension]))
-        {
-            // If extension not in map, allow it (permissive approach)
-            return true;
-        }
-
-        return in_array($mimeType, $mimeMap[$extension]);
-    }
-
-    /**
      * Get human-readable error message for upload error codes
      */
     private function getUploadErrorMessage(int $errorCode): string
@@ -749,49 +614,12 @@ class FileController extends Controller
         }
     }
 
-    /**     * Get list of valid MIME types for admin reference
+    /**
+     * Get list of valid MIME types for admin reference
      */
     public function getValidMimeTypes(Request $request, Response $response): Response
     {
-        // Common MIME type mappings
-        $mimeMap = [
-            'jpg' => ['image/jpeg', 'image/jpg'],
-            'jpeg' => ['image/jpeg', 'image/jpg'],
-            'png' => ['image/png'],
-            'gif' => ['image/gif'],
-            'bmp' => ['image/bmp', 'image/x-bmp'],
-            'tiff' => ['image/tiff', 'image/x-tiff'],
-            'svg' => ['image/svg+xml'],
-            'webp' => ['image/webp'],
-            'pdf' => ['application/pdf'],
-            'doc' => ['application/msword'],
-            'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-            'xls' => ['application/vnd.ms-excel'],
-            'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
-            'ppt' => ['application/vnd.ms-powerpoint'],
-            'pptx' => ['application/vnd.openxmlformats-officedocument.presentationml.presentation'],
-            'odt' => ['application/vnd.oasis.opendocument.text'],
-            'rtf' => ['application/rtf', 'text/rtf'],
-            'txt' => ['text/plain'],
-            'csv' => ['text/csv', 'text/plain', 'application/csv'],
-            'json' => ['application/json'],
-            'xml' => ['application/xml', 'text/xml'],
-            'html' => ['text/html'],
-            'zip' => ['application/zip', 'application/x-zip-compressed'],
-            'rar' => ['application/vnd.rar', 'application/x-rar-compressed', 'application/x-rar', 'application/octet-stream', 'application/x-compressed'],
-            '7z' => ['application/x-7z-compressed'],
-            'tar' => ['application/x-tar'],
-            'gz' => ['application/gzip', 'application/x-gzip'],
-            'mp4' => ['video/mp4'],
-            'avi' => ['video/x-msvideo', 'video/avi'],
-            'mov' => ['video/quicktime'],
-            'wmv' => ['video/x-ms-wmv'],
-            'mp3' => ['audio/mpeg'],
-            'wav' => ['audio/wav', 'audio/x-wav'],
-            'flac' => ['audio/flac'],
-            'aac' => ['audio/aac'],
-        ];
-
+        $mimeMap = MimeTypeMap::getMap();
         return $this->json($response, [
             'valid_mime_types' => $mimeMap,
             'total_extensions' => count($mimeMap)
@@ -859,16 +687,16 @@ class FileController extends Controller
             ->map(function ($file) use ($user, $request)
             {
                 $baseUrl = (string)($_ENV['UPLOAD_URL'] ?? '');
-                $userIp = self::getClientIp($request) ?: null;
+                $userIp = RequestHelper::getClientIp($request) ?: null;
                 return [
                     'id' => $file->id,
                     'filename' => $file->name,
                     'original_filename' => $file->name, // Since we don't store original separately
                     'file_size' => $file->size,
-                    'file_size_formatted' => $this->formatBytes($file->size),
+                    'file_size_formatted' => FormatHelper::formatBytes($file->size),
                     'mime_type' => $file->type,
                     'file_path' => $file->path,
-                    'download_url' => self::generateSecureFileLink($file->id, $baseUrl, $userIp),
+                    'download_url' => SecureLinkService::generateSecureFileLink($file->id, $baseUrl, $userIp),
                     'created_at' => $file->created_at,
                     'updated_at' => $file->updated_at,
                 ];
@@ -888,19 +716,6 @@ class FileController extends Controller
                 'has_prev' => $page > 1,
             ]
         ]);
-    }
-
-    /**
-     * Format bytes to human-readable size
-     */
-    private function formatBytes(int $bytes): string
-    {
-        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
-        $bytes = max($bytes, 0);
-        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
-        $pow = min($pow, count($units) - 1);
-        $bytes /= (1024 ** $pow);
-        return round($bytes, 2) . ' ' . $units[$pow];
     }
 
     /**
@@ -1007,10 +822,9 @@ class FileController extends Controller
         }
 
         $path = '/files/serve/' . $fileId;
-        $secret = self::getSecureLinkSecret();
-        $userIp = self::getClientIp($request);
+        $userIp = RequestHelper::getClientIp($request);
 
-        if (!self::verifySecureLinkWithOptionalIp($path, $secret, $providedMd5, $expires, $userIp))
+        if (!SecureLinkService::verifySecureLink($path, $providedMd5, $expires, $userIp))
         {
             return $this->renderErrorPage($response, 403,
                 'لینک دانلود منقضی یا نامعتبر است',
@@ -1042,7 +856,7 @@ class FileController extends Controller
         {
             DownloadLog::create([
                 'file_id' => $file->id,
-                'ip_address' => self::getClientIp($request) ?: null,
+                'ip_address' => RequestHelper::getClientIp($request) ?: null,
                 'user_agent' => $request->getHeaderLine('User-Agent') ?: null,
             ]);
         }
@@ -1123,9 +937,8 @@ class FileController extends Controller
         }
 
         $pathForHash = $request->getUri()->getPath();
-        $secret = self::getSecureLinkSecret();
-        $userIp = self::getClientIp($request);
-        if (!self::verifySecureLinkWithOptionalIp($pathForHash, $secret, $providedMd5, $expires, $userIp))
+        $userIp = RequestHelper::getClientIp($request);
+        if (!SecureLinkService::verifySecureLink($pathForHash, $providedMd5, $expires, $userIp))
         {
             return $this->renderErrorPage($response, 403,
                 'لینک دانلود منقضی یا نامعتبر است',
@@ -1184,7 +997,7 @@ class FileController extends Controller
         {
             DownloadLog::create([
                 'file_id' => $file->id,
-                'ip_address' => self::getClientIp($request) ?: null,
+                'ip_address' => RequestHelper::getClientIp($request) ?: null,
                 'user_agent' => $request->getHeaderLine('User-Agent') ?: null,
             ]);
         }
@@ -1214,49 +1027,4 @@ class FileController extends Controller
         return $response;
     }
 
-    /**
-     * Get MIME type from file extension
-     */
-    private function getMimeTypeFromExtension(string $extension): ?string
-    {
-        $mimeMap = [
-            'jpg' => 'image/jpeg',
-            'jpeg' => 'image/jpeg',
-            'png' => 'image/png',
-            'gif' => 'image/gif',
-            'bmp' => 'image/bmp',
-            'tiff' => 'image/tiff',
-            'svg' => 'image/svg+xml',
-            'webp' => 'image/webp',
-            'pdf' => 'application/pdf',
-            'doc' => 'application/msword',
-            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'xls' => 'application/vnd.ms-excel',
-            'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'ppt' => 'application/vnd.ms-powerpoint',
-            'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-            'odt' => 'application/vnd.oasis.opendocument.text',
-            'rtf' => 'application/rtf',
-            'txt' => 'text/plain',
-            'csv' => 'text/csv',
-            'json' => 'application/json',
-            'xml' => 'application/xml',
-            'html' => 'text/html',
-            'zip' => 'application/zip',
-            'rar' => 'application/vnd.rar',
-            '7z' => 'application/x-7z-compressed',
-            'tar' => 'application/x-tar',
-            'gz' => 'application/gzip',
-            'mp4' => 'video/mp4',
-            'avi' => 'video/x-msvideo',
-            'mov' => 'video/quicktime',
-            'wmv' => 'video/x-ms-wmv',
-            'mp3' => 'audio/mpeg',
-            'wav' => 'audio/wav',
-            'flac' => 'audio/flac',
-            'aac' => 'audio/aac',
-        ];
-
-        return $mimeMap[strtolower($extension)] ?? null;
-    }
 }

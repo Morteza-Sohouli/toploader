@@ -5,13 +5,14 @@ namespace App\Controllers;
 use App\Models\User;
 use App\Models\File;
 use App\Models\DownloadLog;
+use App\Service\SecureLinkService;
+use App\Util\FormatHelper;
+use App\Util\RequestHelper;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 class AdminController extends Controller
 {
-    private const HASH_SALT = 'your-slsjfos8s8ohs8fhos;8dfs8fs8afoafsp;production';
-
     // ==================== FILE ENDPOINTS ====================
 
     /**
@@ -92,17 +93,17 @@ class AdminController extends Controller
             ->map(function ($file) use ($request) {
                 $owner = User::find($file->owner);
                 $baseUrl = (string) (getenv('UPLOAD_URL') ?: '');
-                $userIp = $request->getServerParams()['REMOTE_ADDR'] ?? null;
+                $userIp = RequestHelper::getClientIp($request) ?: null;
                 return [
                     'id' => $file->id,
                     'filename' => $file->name,
                     'type' => $file->type,
                     'size' => $file->size,
-                    'size_formatted' => $this->formatBytes($file->size),
+                    'size_formatted' => FormatHelper::formatBytes($file->size),
                     'owner_id' => $file->owner,
                     'owner_name' => $owner ? $owner->username : 'Unknown',
                     'download_count' => (int) $file->download_count,
-                    'download_url' => FileController::generateSecureFileLink($file->id, $baseUrl, $userIp),
+                    'download_url' => SecureLinkService::generateSecureFileLink($file->id, $baseUrl, $userIp),
                     'path' => $file->path,
                     'created_at' => $file->created_at,
                     'updated_at' => $file->updated_at,
@@ -196,7 +197,7 @@ class AdminController extends Controller
                     'is_admin' => (bool) $user->is_admin,
                     'file_count' => $fileCount,
                     'total_size' => (int) $totalSize,
-                    'total_size_formatted' => $this->formatBytes((int) $totalSize),
+                    'total_size_formatted' => FormatHelper::formatBytes((int) $totalSize),
                     'created_at' => $user->created_at,
                     'updated_at' => $user->updated_at,
                 ];
@@ -385,7 +386,7 @@ class AdminController extends Controller
                 'type' => $row->type,
                 'count' => (int) $row->count,
                 'total_size' => (int) $row->total_size,
-                'total_size_formatted' => $this->formatBytes((int) $row->total_size),
+                'total_size_formatted' => FormatHelper::formatBytes((int) $row->total_size),
             ]);
 
         // User stats
@@ -405,7 +406,7 @@ class AdminController extends Controller
                     'username' => $user ? $user->username : 'Unknown',
                     'file_count' => (int) $row->file_count,
                     'total_size' => (int) $row->total_size,
-                    'total_size_formatted' => $this->formatBytes((int) $row->total_size),
+                    'total_size_formatted' => FormatHelper::formatBytes((int) $row->total_size),
                 ];
             });
 
@@ -422,14 +423,14 @@ class AdminController extends Controller
                 'date' => $row->date,
                 'count' => (int) $row->count,
                 'total_size' => (int) $row->total_size,
-                'total_size_formatted' => $this->formatBytes((int) $row->total_size),
+                'total_size_formatted' => FormatHelper::formatBytes((int) $row->total_size),
             ]);
 
         return $this->json($response, [
             'files' => [
                 'total_count' => $totalFiles,
                 'total_size' => (int) $totalSize,
-                'total_size_formatted' => $this->formatBytes((int) $totalSize),
+                'total_size_formatted' => FormatHelper::formatBytes((int) $totalSize),
                 'by_type' => $filesByType,
                 'uploads_last_7_days' => $recentUploads,
                 'uploads_per_day' => $uploadsPerDay,
@@ -440,21 +441,6 @@ class AdminController extends Controller
                 'top_by_files' => $topUsersByFiles,
             ],
         ]);
-    }
-
-    // ==================== HELPERS ====================
-
-    /**
-     * Format bytes to human-readable size
-     */
-    private function formatBytes(int $bytes): string
-    {
-        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
-        $bytes = max($bytes, 0);
-        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
-        $pow = min($pow, count($units) - 1);
-        $bytes /= (1024 ** $pow);
-        return round($bytes, 2) . ' ' . $units[$pow];
     }
 
 }

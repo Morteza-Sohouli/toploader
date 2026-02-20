@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Models\User;
 use App\Models\File;
 use App\Models\DownloadLog;
+use App\Util\FormatHelper;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -33,7 +34,7 @@ class StatsController extends Controller
                 'type' => $row->type,
                 'count' => (int)$row->count,
                 'total_size' => (int)$row->total_size,
-                'total_size_formatted' => $this->formatBytes((int)$row->total_size),
+                'total_size_formatted' => FormatHelper::formatBytes((int)$row->total_size),
             ]);
 
         $userRecentUploads = File::where('owner', $user->id)
@@ -52,7 +53,7 @@ class StatsController extends Controller
         return $this->json($response, [
             'file_count' => $userFileCount,
             'total_size' => (int)$userTotalSize,
-            'total_size_formatted' => $this->formatBytes((int)$userTotalSize),
+            'total_size_formatted' => FormatHelper::formatBytes((int)$userTotalSize),
             'files_by_type' => $userFilesByType,
             'uploads_last_7_days' => $userRecentUploads,
             'total_downloads' => $totalDownloads,
@@ -60,16 +61,4 @@ class StatsController extends Controller
         ]);
     }
 
-    /**
-     * Format bytes to human-readable size
-     */
-    private function formatBytes(int $bytes): string
-    {
-        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
-        $bytes = max($bytes, 0);
-        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
-        $pow = min($pow, count($units) - 1);
-        $bytes /= (1024 ** $pow);
-        return round($bytes, 2) . ' ' . $units[$pow];
-    }
 }
