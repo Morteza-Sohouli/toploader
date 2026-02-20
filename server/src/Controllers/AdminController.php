@@ -25,6 +25,7 @@ class AdminController extends Controller
         $limit = max(1, min(100, (int) ($params['limit'] ?? 30)));
         $search = $params['search'] ?? null;
         $ownerName = $params['owner_name'] ?? null;
+        $host = $params['host'] ?? null;
         $type = $params['type'] ?? null;
         $fromDate = $params['from_date'] ?? null;
         $toDate = $params['to_date'] ?? null;
@@ -62,6 +63,11 @@ class AdminController extends Controller
         if ($ownerName !== null && trim($ownerName) !== '') {
             $ownerIds = User::where('username', 'LIKE', '%' . $ownerName . '%')->pluck('id')->toArray();
             $query->whereIn('owner', $ownerIds);
+        }
+
+        // Filter by host
+        if ($host !== null && trim($host) !== '') {
+            $query->where('host', 'LIKE', '%' . trim($host) . '%');
         }
 
         // Filter by file type

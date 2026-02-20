@@ -123,6 +123,7 @@ export const adminApi = {
     limit?: number;
     search?: string;
     owner_name?: string;
+    host?: string;
     type?: string;
     from_date?: string;
     to_date?: string;
@@ -136,6 +137,7 @@ export const adminApi = {
     if (params.limit) searchParams.set("limit", params.limit.toString());
     if (params.search?.trim()) searchParams.set("search", params.search.trim());
     if (params.owner_name?.trim()) searchParams.set("owner_name", params.owner_name.trim());
+    if (params.host?.trim()) searchParams.set("host", params.host.trim());
     if (params.type?.trim()) searchParams.set("type", params.type.trim());
     if (params.from_date?.trim()) searchParams.set("from_date", params.from_date.trim());
     if (params.to_date?.trim()) searchParams.set("to_date", params.to_date.trim());

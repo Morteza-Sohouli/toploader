@@ -261,6 +261,13 @@
                 placeholder="نوع فایل (مثلاً pdf)"
                 class="input-field w-full md:w-40"
               />
+              <input
+                v-model="fileHostFilter"
+                @input="debouncedFetchFiles"
+                type="text"
+                placeholder="میزبان"
+                class="input-field w-full md:w-40"
+              />
               <select
                 v-model="fileSortBy"
                 @change="fetchFiles(1)"
@@ -713,6 +720,7 @@ const isLoadingFiles = ref(false);
 const fileSearch = ref("");
 const fileOwnerFilter = ref("");
 const fileTypeFilter = ref("");
+const fileHostFilter = ref("");
 const fileFromDate = ref("");
 const fileToDate = ref("");
 const downloadFromDate = ref("");
@@ -733,6 +741,7 @@ async function fetchFiles(page = 1) {
     limit: 30,
     search: fileSearch.value,
     owner_name: fileOwnerFilter.value || undefined,
+    host: fileHostFilter.value || undefined,
     type: fileTypeFilter.value,
     from_date: fileFromDate.value || undefined,
     to_date: fileToDate.value || undefined,
