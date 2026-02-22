@@ -35,22 +35,17 @@ class FileController extends Controller
      */
     private static function loadWpDomainsMap(): array
     {
-        if (self::$wpDomainsMap === null)
-        {
+        if (self::$wpDomainsMap === null) {
             // Mounted into the container at /var/www/config/wp-domains.json
             $configPath = '/var/www/config/wp-domains.json';
-            if (!is_file($configPath))
-            {
+            if (!is_file($configPath)) {
                 // Fallback: relative to project root (local dev without Docker)
                 $configPath = __DIR__ . '/../../config/wp-domains.json';
             }
-            if (is_file($configPath))
-            {
+            if (is_file($configPath)) {
                 $json = file_get_contents($configPath);
                 self::$wpDomainsMap = json_decode($json, true) ?: [];
-            }
-            else
-            {
+            } else {
                 self::$wpDomainsMap = [];
             }
         }
@@ -77,8 +72,7 @@ class FileController extends Controller
         // Strip port if present (e.g. "domain.com:443" → "domain.com")
         $domain = strtolower(explode(':', $host)[0]);
 
-        if ($domain !== '' && isset($map[$domain]))
-        {
+        if ($domain !== '' && isset($map[$domain])) {
             return rtrim($map[$domain], '/\\');
         }
 
@@ -93,8 +87,7 @@ class FileController extends Controller
     public function createUploadToken(Request $request, Response $response): Response
     {
         $user = User::find($_SESSION['user_id']);
-        if (!$user)
-        {
+        if (!$user) {
             return $this->json($response, ['error' => 'User not found'], 404);
         }
 
@@ -119,29 +112,24 @@ class FileController extends Controller
     private static function verifyUploadToken(string $token): ?array
     {
         $parts = explode('.', $token, 2);
-        if (count($parts) !== 2)
-        {
+        if (count($parts) !== 2) {
             return null;
         }
         [$payloadB64, $signature] = $parts;
         $expected = hash_hmac('sha256', $payloadB64, SecureLinkService::getHmacSecret());
-        if (!hash_equals($expected, $signature))
-        {
+        if (!hash_equals($expected, $signature)) {
             return null;
         }
         $padded = str_pad(strtr($payloadB64, '-_', '+/'), strlen($payloadB64) + (4 - strlen($payloadB64) % 4) % 4, '=');
         $json = base64_decode($padded, true);
-        if ($json === false)
-        {
+        if ($json === false) {
             return null;
         }
         $payload = json_decode($json, true);
-        if (!is_array($payload) || !isset($payload['expires_at']))
-        {
+        if (!is_array($payload) || !isset($payload['expires_at'])) {
             return null;
         }
-        if ($payload['expires_at'] < time())
-        {
+        if ($payload['expires_at'] < time()) {
             return null;
         }
         return $payload;
@@ -153,18 +141,15 @@ class FileController extends Controller
     private static function parseTusMetadata(string $raw): array
     {
         $result = [];
-        foreach (explode(',', $raw) as $pair)
-        {
+        foreach (explode(',', $raw) as $pair) {
             $pair = trim($pair);
-            if ($pair === '')
-            {
+            if ($pair === '') {
                 continue;
             }
             $parts = explode(' ', $pair, 2);
             $key = $parts[0];
             $value = isset($parts[1]) ? base64_decode($parts[1], true) : '';
-            if ($value === false)
-            {
+            if ($value === false) {
                 $value = '';
             }
             $result[$key] = $value;
@@ -196,21 +181,18 @@ class FileController extends Controller
         // Slim's body parsing middleware may have already consumed the stream,
         // so prefer getParsedBody(); fall back to reading the raw stream.
         $data = $request->getParsedBody();
-        if (!is_array($data))
-        {
+        if (!is_array($data)) {
             $body = (string)$request->getBody();
             $data = json_decode($body, true);
         }
-        if (!is_array($data))
-        {
+        if (!is_array($data)) {
             return $this->json($response, ['ok' => true]);
         }
 
         $type = $data['Type'] ?? '';
         $upload = $data['Event']['Upload'] ?? [];
 
-        switch ($type)
-        {
+        switch ($type) {
             case 'pre-create':
                 return $this->tusPreCreate($response, $upload);
             case 'post-finish':
@@ -227,36 +209,30 @@ class FileController extends Controller
         $filename = $metaRaw['filename'] ?? '';
         $uploadSize = (int)($upload['Size'] ?? 0);
 
-        if ($token === '')
-        {
+        if ($token === '') {
             return $this->tusReject($response, 'Missing upload token', 403);
         }
 
         $payload = self::verifyUploadToken($token);
-        if ($payload === null)
-        {
+        if ($payload === null) {
             return $this->tusReject($response, 'Invalid or expired upload token', 403);
         }
 
-        if ($uploadSize > ($payload['max_size'] ?? self::MAX_FILE_SIZE))
-        {
+        if ($uploadSize > ($payload['max_size'] ?? self::MAX_FILE_SIZE)) {
             return $this->tusReject($response, 'File too large');
         }
 
-        if ($uploadSize === 0)
-        {
+        if ($uploadSize === 0) {
             return $this->tusReject($response, 'File is empty');
         }
 
         $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-        if ($extension === '')
-        {
+        if ($extension === '') {
             return $this->tusReject($response, 'File has no extension');
         }
 
         $allowedTypes = $this->parseAllowedFileTypes($payload['allowed_types'] ?? '');
-        if (!empty($allowedTypes) && !in_array($extension, $allowedTypes))
-        {
+        if (!empty($allowedTypes) && !in_array($extension, $allowedTypes)) {
             return $this->tusReject($response, 'File type "' . $extension . '" not allowed. Allowed: ' . implode(', ', $allowedTypes));
         }
 
@@ -276,8 +252,7 @@ class FileController extends Controller
         $tusInfoPath = ($upload['Storage']['InfoPath'] ?? '') ?: ($tusFilePath . '.info');
 
         $payload = self::verifyUploadToken($token);
-        if ($payload === null)
-        {
+        if ($payload === null) {
             error_log('[TUS post-finish] Invalid token for upload ' . $uploadId);
             return $this->json($response, ['ok' => true]);
         }
@@ -289,8 +264,7 @@ class FileController extends Controller
         $userUploadDir = self::UPLOAD_DIR . $userId . '/';
         $datePath = date('Y/m/d') . '/';
         $datedUploadDir = $userUploadDir . $datePath;
-        if (!is_dir($datedUploadDir))
-        {
+        if (!is_dir($datedUploadDir)) {
             mkdir($datedUploadDir, 0755, true);
         }
 
@@ -299,41 +273,35 @@ class FileController extends Controller
         // Skip file_exists() — PHP's realpath/stat cache is unreliable for files
         // created by external processes. Just attempt the move directly.
         $moved = @rename($tusFilePath, $targetPath);
-        if (!$moved)
-        {
+        if (!$moved) {
             $moved = @copy($tusFilePath, $targetPath);
-            if ($moved)
-            {
+            if ($moved) {
                 @unlink($tusFilePath);
             }
         }
 
-        if (!$moved)
-        {
+        if (!$moved) {
             error_log('[TUS post-finish] Failed to move ' . $tusFilePath . ' -> ' . $targetPath . ' error: ' . error_get_last()['message'] ?? 'unknown');
             return $this->json($response, ['ok' => true]);
         }
 
-        if (file_exists($tusInfoPath))
-        {
+        if (file_exists($tusInfoPath)) {
             @unlink($tusInfoPath);
         }
 
-        try
-        {
+        try {
             $fileRecord = File::create([
                 'owner' => $userId,
                 'name' => $sanitizedFilename,
                 'type' => $extension,
                 'size' => $fileSize,
                 'path' => $targetPath,
+                // get host domain
+                'host' => $_SERVER['HTTP_HOST'] ?? 'unknown',
             ]);
-        }
-        catch (\Exception $e)
-        {
+        } catch (\Exception $e) {
             error_log('[TUS post-finish] DB error: ' . $e->getMessage());
-            if (file_exists($targetPath))
-            {
+            if (file_exists($targetPath)) {
                 @unlink($targetPath);
             }
             return $this->json($response, ['ok' => true]);
@@ -363,33 +331,28 @@ class FileController extends Controller
     public function getTusUploadResult(Request $request, Response $response, array $args): Response
     {
         $uploadId = $args['uploadId'] ?? '';
-        if ($uploadId === '' || preg_match('/[^a-zA-Z0-9_+-]/', $uploadId))
-        {
+        if ($uploadId === '' || preg_match('/[^a-zA-Z0-9_+-]/', $uploadId)) {
             return $this->json($response, ['error' => 'Invalid upload ID'], 400);
         }
 
         $resultPath = self::TUS_DATA_DIR . $uploadId . '.result.json';
-        if (!file_exists($resultPath))
-        {
+        if (!file_exists($resultPath)) {
             return $this->json($response, ['error' => 'Upload result not found'], 404);
         }
 
         $result = json_decode(file_get_contents($resultPath), true);
-        if (!is_array($result))
-        {
+        if (!is_array($result)) {
             return $this->json($response, ['error' => 'Corrupt result file'], 500);
         }
 
         // Verify the requesting user owns this file
         $user = User::find($_SESSION['user_id'] ?? 0);
-        if (!$user)
-        {
+        if (!$user) {
             return $this->json($response, ['error' => 'Unauthorized'], 401);
         }
 
         $fileRecord = File::find($result['file_id'] ?? 0);
-        if (!$fileRecord || (int)$fileRecord->owner !== (int)$user->id)
-        {
+        if (!$fileRecord || (int)$fileRecord->owner !== (int)$user->id) {
             return $this->json($response, ['error' => 'Unauthorized'], 403);
         }
 
@@ -409,24 +372,21 @@ class FileController extends Controller
     {
         // Get authenticated user (authentication already verified by middleware)
         $user = User::find($_SESSION['user_id']);
-        if (!$user)
-        {
+        if (!$user) {
             return $this->json($response, ['error' => 'User not found'], 404);
         }
 
         // Get uploaded files
         $uploadedFiles = $request->getUploadedFiles();
 
-        if (empty($uploadedFiles['file']))
-        {
+        if (empty($uploadedFiles['file'])) {
             return $this->json($response, ['error' => 'No file uploaded'], 400);
         }
 
         $uploadedFile = $uploadedFiles['file'];
 
         // Check for upload errors
-        if ($uploadedFile->getError() !== UPLOAD_ERR_OK)
-        {
+        if ($uploadedFile->getError() !== UPLOAD_ERR_OK) {
             return $this->json($response, ['error' => 'File upload error: ' . $this->getUploadErrorMessage($uploadedFile->getError())], 400);
         }
 
@@ -435,31 +395,27 @@ class FileController extends Controller
         $fileSize = $uploadedFile->getSize();
 
         // Validate file size
-        if ($fileSize > self::MAX_FILE_SIZE)
-        {
+        if ($fileSize > self::MAX_FILE_SIZE) {
             return $this->json($response, [
                 'error' => 'File size exceeds maximum allowed size of ' . (FormatHelper::formatBytes(self::MAX_FILE_SIZE))
             ], 400);
         }
 
-        if ($fileSize === 0)
-        {
+        if ($fileSize === 0) {
             return $this->json($response, ['error' => 'Uploaded file is empty'], 400);
         }
 
         // Get file extension
         $fileExtension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
 
-        if (empty($fileExtension))
-        {
+        if (empty($fileExtension)) {
             return $this->json($response, ['error' => 'File has no extension'], 400);
         }
 
         // Validate file type against user's allowed file types
         $allowedFileTypes = $this->parseAllowedFileTypes($user->allowedFileTypes);
 
-        if (!in_array($fileExtension, $allowedFileTypes))
-        {
+        if (!in_array($fileExtension, $allowedFileTypes)) {
             return $this->json($response, [
                 'error' => 'File type "' . $fileExtension . '" is not allowed. Allowed types: ' . implode(', ', $allowedFileTypes)
             ], 400);
@@ -467,31 +423,27 @@ class FileController extends Controller
 
         // Additional MIME type validation for extra security
         $mimeType = $uploadedFile->getClientMediaType();
-        if (!MimeTypeMap::isValidMimeType($mimeType, $fileExtension))
-        {
+        if (!MimeTypeMap::isValidMimeType($mimeType, $fileExtension)) {
             return $this->json($response, [
                 'error' => 'File MIME type does not match extension'
             ], 400);
         }
 
         // Create upload directory if it doesn't exist
-        if (!is_dir(self::UPLOAD_DIR))
-        {
+        if (!is_dir(self::UPLOAD_DIR)) {
             mkdir(self::UPLOAD_DIR, 0755, true);
         }
 
         // Create user-specific subdirectory
         $userUploadDir = self::UPLOAD_DIR . $user->id . '/';
-        if (!is_dir($userUploadDir))
-        {
+        if (!is_dir($userUploadDir)) {
             mkdir($userUploadDir, 0755, true);
         }
 
         // Create date-based subdirectory: YYYY/MM/DD
         $datePath = date('Y/m/d') . '/';
         $datedUploadDir = $userUploadDir . $datePath;
-        if (!is_dir($datedUploadDir))
-        {
+        if (!is_dir($datedUploadDir)) {
             mkdir($datedUploadDir, 0755, true);
         }
 
@@ -500,12 +452,9 @@ class FileController extends Controller
         $targetPath = $datedUploadDir . $sanitizedFilename;
 
         // Move uploaded file using streaming (memory-efficient for large files)
-        try
-        {
+        try {
             $uploadedFile->moveTo($targetPath);
-        }
-        catch (\Exception $e)
-        {
+        } catch (\Exception $e) {
             return $this->json($response, [
                 'error' => 'Failed to save file: ' . $e->getMessage()
             ], 500);
@@ -513,8 +462,7 @@ class FileController extends Controller
 
         // Save file metadata to database
         $host = $request->getHeaderLine('Host');
-        try
-        {
+        try {
             $fileRecord = File::create([
                 'owner' => $user->id,
                 'name' => $sanitizedFilename,
@@ -523,12 +471,9 @@ class FileController extends Controller
                 'path' => $targetPath,
                 'host' => $host !== '' ? $host : null,
             ]);
-        }
-        catch (\Exception $e)
-        {
+        } catch (\Exception $e) {
             // If database save fails, try to delete the uploaded file
-            if (file_exists($targetPath))
-            {
+            if (file_exists($targetPath)) {
                 unlink($targetPath);
             }
             return $this->json($response, [
@@ -562,8 +507,7 @@ class FileController extends Controller
      */
     private function parseAllowedFileTypes(?string $allowedFileTypes): array
     {
-        if (empty($allowedFileTypes))
-        {
+        if (empty($allowedFileTypes)) {
             return [];
         }
 
@@ -597,8 +541,7 @@ class FileController extends Controller
      */
     private function getUploadErrorMessage(int $errorCode): string
     {
-        switch ($errorCode)
-        {
+        switch ($errorCode) {
             case UPLOAD_ERR_INI_SIZE:
                 return 'File exceeds upload_max_filesize directive in php.ini';
             case UPLOAD_ERR_FORM_SIZE:
@@ -637,8 +580,7 @@ class FileController extends Controller
     {
         // Get authenticated user
         $user = \App\Models\User::find($_SESSION['user_id']);
-        if (!$user)
-        {
+        if (!$user) {
             return $this->json($response, ['error' => 'User not found'], 404);
         }
 
@@ -661,22 +603,18 @@ class FileController extends Controller
         $query = \App\Models\File::where('owner', $user->id);
 
         // Apply search filter
-        if ($search !== null && trim($search) !== '')
-        {
-            $query->where(function ($q) use ($search)
-            {
+        if ($search !== null && trim($search) !== '') {
+            $query->where(function ($q) use ($search) {
                 $q->where('name', 'LIKE', '%' . $search . '%');
             });
         }
 
         // Apply date range filters
-        if ($fromDate !== null && trim($fromDate) !== '')
-        {
+        if ($fromDate !== null && trim($fromDate) !== '') {
             $query->where('created_at', '>=', $fromDate . ' 00:00:00');
         }
 
-        if ($toDate !== null && trim($toDate) !== '')
-        {
+        if ($toDate !== null && trim($toDate) !== '') {
             $query->where('created_at', '<=', $toDate . ' 23:59:59');
         }
 
@@ -688,8 +626,7 @@ class FileController extends Controller
             ->skip($offset)
             ->take($limit)
             ->get()
-            ->map(function ($file) use ($user, $request)
-            {
+            ->map(function ($file) use ($user, $request) {
                 $baseUrl = (string)($_ENV['UPLOAD_URL'] ?? '');
                 $userIp = RequestHelper::getClientIp($request) ?: null;
                 return [
@@ -799,8 +736,7 @@ class FileController extends Controller
     {
         $escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], $filename);
         $value = 'attachment; filename="' . $escaped . '"';
-        if (preg_match('/[^\x20-\x7E]/', $filename))
-        {
+        if (preg_match('/[^\x20-\x7E]/', $filename)) {
             $value .= '; filename*=UTF-8\'\'' . rawurlencode($filename);
         }
         return $value;
@@ -817,82 +753,93 @@ class FileController extends Controller
         $providedMd5 = $params['md5'] ?? null;
         $expires = $params['expires'] ?? null;
 
-        if (!$fileId || !$providedMd5 || $expires === null || $expires === '')
-        {
-            return $this->renderErrorPage($response, 400,
+        if (!$fileId || !$providedMd5 || $expires === null || $expires === '') {
+            return $this->renderErrorPage(
+                $response,
+                400,
                 'لینک دانلود ناقص است',
                 'برای دانلود فایل، لینک کامل با پارامترهای امنیتی لازم است. لطفاً وارد حساب خود در تاپ جی اس ام شوید و دوباره روی دانلود کلیک کنید.',
-                'اگر از صفحهٔ سایت به اینجا آمده‌اید، لینک ممکن است نادرست کپی شده باشد.');
+                'اگر از صفحهٔ سایت به اینجا آمده‌اید، لینک ممکن است نادرست کپی شده باشد.'
+            );
         }
 
         $path = '/files/serve/' . $fileId;
         $userIp = RequestHelper::getClientIp($request);
 
-        if (!SecureLinkService::verifySecureLink($path, $providedMd5, $expires, $userIp))
-        {
-            return $this->renderErrorPage($response, 403,
+        if (!SecureLinkService::verifySecureLink($path, $providedMd5, $expires, $userIp)) {
+            return $this->renderErrorPage(
+                $response,
+                403,
                 'لینک دانلود منقضی یا نامعتبر است',
                 'این لینک دیگر قابل استفاده نیست. لینک‌های دانلود پس از مدتی منقضی می‌شوند.',
-                'لطفاً دوباره از صفحهٔ دانلود ها، لینک دانلود جدید بگیرید.');
+                'لطفاً دوباره از صفحهٔ دانلود ها، لینک دانلود جدید بگیرید.'
+            );
         }
 
         // Find file by ID
         $file = File::find($fileId);
-        if (!$file)
-        {
-            return $this->renderErrorPage($response, 404,
+        if (!$file) {
+            return $this->renderErrorPage(
+                $response,
+                404,
                 'فایل یافت نشد',
                 'فایلی با این شناسه در سیستم وجود ندارد. ممکن است فایل حذف شده یا شناسه اشتباه باشد.',
-                'لطفا با پشتیبانی تماس بگیرید');
+                'لطفا با پشتیبانی تماس بگیرید'
+            );
         }
 
         // Check if file exists on disk
-        if (!file_exists($file->path))
-        {
-            return $this->renderErrorPage($response, 404,
+        if (!file_exists($file->path)) {
+            return $this->renderErrorPage(
+                $response,
+                404,
                 'فایل روی دیسک یافت نشد',
                 'رکورد فایل موجود است اما فایل فیزیکی روی سرور پیدا نشد. احتمالاً فایل حذف یا جابجا شده است.',
-                'لطفا با پشتیبانی تماس بگیرید');
+                'لطفا با پشتیبانی تماس بگیرید'
+            );
         }
 
         // Log the download (don't let logging failure block the download)
-        try
-        {
+        try {
             DownloadLog::create([
                 'file_id' => $file->id,
                 'ip_address' => RequestHelper::getClientIp($request) ?: null,
                 'user_agent' => $request->getHeaderLine('User-Agent') ?: null,
             ]);
-        }
-        catch (\Exception $e)
-        {
+        } catch (\Exception $e) {
             // Silently fail — serving the file is more important than logging
         }
 
         // Redirect to nginx internal location so nginx serves the file directly (no PHP streaming)
         $uploadDirReal = realpath(self::UPLOAD_DIR);
-        if ($uploadDirReal === false || !is_dir($uploadDirReal))
-        {
-            return $this->renderErrorPage($response, 500,
+        if ($uploadDirReal === false || !is_dir($uploadDirReal)) {
+            return $this->renderErrorPage(
+                $response,
+                500,
                 'پوشهٔ آپلود در دسترس نیست',
                 'سرور نمی‌تواند به پوشهٔ فایل‌های آپلود شده دسترسی پیدا کند. این مشکل موقتی است.',
-                'لطفاً چند دقیقه بعد دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.');
+                'لطفاً چند دقیقه بعد دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.'
+            );
         }
         $pathReal = realpath($file->path);
-        if ($pathReal === false || !is_file($pathReal))
-        {
-            return $this->renderErrorPage($response, 404,
+        if ($pathReal === false || !is_file($pathReal)) {
+            return $this->renderErrorPage(
+                $response,
+                404,
                 'فایل روی دیسک یافت نشد',
                 'فایل فیزیکی در مسیر ذخیره‌سازی پیدا نشد. ممکن است حذف یا منتقل شده باشد.',
-                'لطفا با پشتیبانی تماس بگیرید');
+                'لطفا با پشتیبانی تماس بگیرید'
+            );
         }
         $baseWithSep = $uploadDirReal . DIRECTORY_SEPARATOR;
-        if ($pathReal !== $uploadDirReal && strpos($pathReal, $baseWithSep) !== 0)
-        {
-            return $this->renderErrorPage($response, 403,
+        if ($pathReal !== $uploadDirReal && strpos($pathReal, $baseWithSep) !== 0) {
+            return $this->renderErrorPage(
+                $response,
+                403,
                 'مسیر فایل معتبر نیست',
                 'مسیر فایل خارج از محدودهٔ مجاز است. تلاش برای دسترسی غیرمجاز شناسایی شد.',
-                'لطفا با پشتیبانی تماس بگیرید');
+                'لطفا با پشتیبانی تماس بگیرید'
+            );
         }
         $relativePath = str_replace([$baseWithSep, '\\'], ['', '/'], $pathReal);
         $internalUri = '/internal_uploads/' . $relativePath;
@@ -912,73 +859,87 @@ class FileController extends Controller
     public function serveWpContentFile(Request $request, Response $response, array $args): Response
     {
         $requestedPath = $args['path'] ?? '';
-        if ($requestedPath === '')
-        {
-            return $this->renderErrorPage($response, 400,
+        if ($requestedPath === '') {
+            return $this->renderErrorPage(
+                $response,
+                400,
                 'مسیر فایل مشخص نشده',
                 'آدرس فایل برای دانلود ارسال نشده است. لطفاً از لینک اصلی سایت استفاده کنید.',
-                'اگر از جای دیگری این لینک را کپی کرده‌اید، لینک ناقص است.');
+                'اگر از جای دیگری این لینک را کپی کرده‌اید، لینک ناقص است.'
+            );
         }
 
         // Reject null bytes (directory injection / legacy PHP path issues)
-        if (strpos($requestedPath, "\0") !== false)
-        {
-            return $this->renderErrorPage($response, 400,
+        if (strpos($requestedPath, "\0") !== false) {
+            return $this->renderErrorPage(
+                $response,
+                400,
                 'مسیر فایل نامعتبر است',
                 'آدرس درخواستی شامل کاراکترهای غیرمجاز است و قابل پردازش نیست.',
-                'لطفاً از لینک صحیح صفحهٔ سایت استفاده کنید.');
+                'لطفاً از لینک صحیح صفحهٔ سایت استفاده کنید.'
+            );
         }
 
         $params = $request->getQueryParams();
         $providedMd5 = $params['md5'] ?? null;
         $expires = $params['expires'] ?? null;
-        if ($providedMd5 === null || $providedMd5 === '' || $expires === null || $expires === '')
-        {
-            return $this->renderErrorPage($response, 400,
+        if ($providedMd5 === null || $providedMd5 === '' || $expires === null || $expires === '') {
+            return $this->renderErrorPage(
+                $response,
+                400,
                 'لینک دانلود ناقص است',
                 'برای دانلود فایل، پارامترهای امنیتی (md5 و expires) لازم است. لطفاً از صفحهٔ اصلی سایت لینک بگیرید.',
-                'وارد اکانت خود در تاپ جی اس ام شوید و دوباره روی دانلود کلیک کنید.');
+                'وارد اکانت خود در تاپ جی اس ام شوید و دوباره روی دانلود کلیک کنید.'
+            );
         }
 
         $pathForHash = $request->getUri()->getPath();
         $userIp = RequestHelper::getClientIp($request);
-        if (!SecureLinkService::verifySecureLink($pathForHash, $providedMd5, $expires, $userIp))
-        {
-            return $this->renderErrorPage($response, 403,
+        if (!SecureLinkService::verifySecureLink($pathForHash, $providedMd5, $expires, $userIp)) {
+            return $this->renderErrorPage(
+                $response,
+                403,
                 'لینک دانلود منقضی یا نامعتبر است',
                 'این لینک امنیتی دیگر معتبر نیست یا منقضی شده. لینک‌های محافظت‌شده پس از مدتی غیرفعال می‌شوند.',
-                'وارد اکانت خود در تاپ جی اس ام شوید و دوباره روی دانلود کلیک کنید.');
+                'وارد اکانت خود در تاپ جی اس ام شوید و دوباره روی دانلود کلیک کنید.'
+            );
         }
 
         $host = $request->getHeaderLine('Host');
         $basePath = self::getWpUploadsBase($host);
         $baseReal = realpath($basePath);
-        if ($baseReal === false || !is_dir($baseReal))
-        {
-            return $this->renderErrorPage($response, 404,
+        if ($baseReal === false || !is_dir($baseReal)) {
+            return $this->renderErrorPage(
+                $response,
+                404,
                 'پوشهٔ آپلود در دسترس نیست',
                 'پوشهٔ ذخیرهٔ فایل‌های وردپرس برای این دامنه یافت نشد یا قابل دسترسی نیست.',
-                'لطفا با پشتیبانی تماس بگیرید');
+                'لطفا با پشتیبانی تماس بگیرید'
+            );
         }
 
         $baseWithSep = $baseReal . DIRECTORY_SEPARATOR;
         $pathWithBase = $baseWithSep . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $requestedPath);
         $resolved = realpath($pathWithBase);
-        if ($resolved === false || !is_file($resolved))
-        {
-            return $this->renderErrorPage($response, 404,
+        if ($resolved === false || !is_file($resolved)) {
+            return $this->renderErrorPage(
+                $response,
+                404,
                 'فایل یافت نشد',
                 'فایل درخواستی در مسیر آپلودها وجود ندارد. ممکن است فایل حذف شده یا آدرس اشتباه باشد.',
-                'لطفا با پشتیبانی تماس بگیرید');
+                'لطفا با پشتیبانی تماس بگیرید'
+            );
         }
 
         // Strict directory containment: resolved must be exactly base or under it (prevents e.g. base="uploads" matching "uploads_backup/..")
-        if ($resolved !== $baseReal && strpos($resolved, $baseWithSep) !== 0)
-        {
-            return $this->renderErrorPage($response, 403,
+        if ($resolved !== $baseReal && strpos($resolved, $baseWithSep) !== 0) {
+            return $this->renderErrorPage(
+                $response,
+                403,
                 'مسیر فایل معتبر نیست',
                 'مسیر فراتر از محدودهٔ مجاز آپلودها است. دسترسی غیرمجاز تشخیص داده شد.',
-                'لطفا با پشتیبانی تماس بگیرید');
+                'لطفا با پشتیبانی تماس بگیرید'
+            );
         }
 
         $name = basename($resolved);
@@ -986,8 +947,7 @@ class FileController extends Controller
         $size = filesize($resolved);
 
         $file = File::where('path', $resolved)->first();
-        if (!$file)
-        {
+        if (!$file) {
             $file = File::create([
                 'owner' => 1,
                 'name' => $name,
@@ -998,28 +958,22 @@ class FileController extends Controller
             ]);
         }
 
-        try
-        {
+        try {
             DownloadLog::create([
                 'file_id' => $file->id,
                 'ip_address' => RequestHelper::getClientIp($request) ?: null,
                 'user_agent' => $request->getHeaderLine('User-Agent') ?: null,
             ]);
-        }
-        catch (\Exception $e)
-        {
+        } catch (\Exception $e) {
             // Don't block the download
         }
 
         // Redirect to nginx internal location (per-domain) so nginx serves the file directly
         $domain = strtolower(explode(':', $host)[0]);
         $map = self::loadWpDomainsMap();
-        if ($domain !== '' && isset($map[$domain]))
-        {
+        if ($domain !== '' && isset($map[$domain])) {
             $prefix = 'internal_wp_' . self::sanitizeDomainForInternal($domain);
-        }
-        else
-        {
+        } else {
             $prefix = 'internal_wp_default';
         }
         $relativePath = str_replace([$baseWithSep, '\\'], ['', '/'], $resolved);
@@ -1031,5 +985,4 @@ class FileController extends Controller
         $response->getBody()->write('');
         return $response;
     }
-
 }
