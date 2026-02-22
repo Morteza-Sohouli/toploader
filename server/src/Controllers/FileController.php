@@ -296,8 +296,8 @@ class FileController extends Controller
                 'type' => $extension,
                 'size' => $fileSize,
                 'path' => $targetPath,
-                // get host domain
-                'host' => $_SERVER['HTTP_HOST'] ?? 'unknown',
+                // get domain
+                'host' => parse_url($upload['Storage']['Endpoint'] ?? '', PHP_URL_HOST) ?: 'unknown',
             ]);
         } catch (\Exception $e) {
             error_log('[TUS post-finish] DB error: ' . $e->getMessage());
