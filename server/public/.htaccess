@@ -5,16 +5,16 @@ LimitRequestBody 21474836480
 
 # PHP Settings via .htaccess (works if AllowOverride is enabled)
 <IfModule mod_php.c>
-    php_value upload_max_filesize 20G
-    php_value post_max_size 21G
-    php_value memory_limit 1G
+    php_value upload_max_filesize 30G
+    php_value post_max_size 31G
+    php_value memory_limit 10G
     php_value max_execution_time 3600
     php_value max_input_time 3600
 </IfModule>
 
 # For PHP-FPM or FastCGI
 <IfModule mod_fcgid.c>
-    FcgidMaxRequestLen 21474836480
+    FcgidMaxRequestLen 32212254720
     FcgidIOTimeout 3600
 </IfModule>
 

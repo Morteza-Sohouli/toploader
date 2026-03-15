@@ -333,9 +333,7 @@
                         <div class="flex justify-between text-xs">
                           <span>در حال ادامه آپلود...</span>
                           <span
-                            >{{
-                              resumeProgress.get(pending.id) ?? 0
-                            }}%</span
+                            >{{ resumeProgress.get(pending.id) ?? 0 }}%</span
                           >
                         </div>
                         <div
@@ -941,7 +939,7 @@ const validateFile = (file: File): boolean => {
     return false;
   }
 
-  const maxSize = 20 * 1024 * 1024 * 1024;
+  const maxSize = 30 * 1024 * 1024 * 1024;
   if (file.size > maxSize) {
     error.value = "حجم فایل بیش از ۲۰ گیگابایت است";
     return false;

@@ -14,7 +14,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 class FileController extends Controller
 {
-    private const MAX_FILE_SIZE = 21474836480; // 20GB in bytes
+    private const MAX_FILE_SIZE = 30 * 1024 * 1024 * 1024; // 30GB in bytes
     private const UPLOAD_DIR = __DIR__ . '/../../uploads/';
     private const TUS_DATA_DIR = '/data/tus-data/';
 

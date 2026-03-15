@@ -15,9 +15,9 @@ RUN apt-get update && apt-get install -y \
 RUN docker-php-ext-install mysqli pdo pdo_mysql
 
 # PHP upload limits (20GB)
-RUN echo "upload_max_filesize = 20G" > /usr/local/etc/php/conf.d/uploads.ini \
-    && echo "post_max_size = 21G" >> /usr/local/etc/php/conf.d/uploads.ini \
-    && echo "memory_limit = 1G" >> /usr/local/etc/php/conf.d/uploads.ini \
+RUN echo "upload_max_filesize = 30G" > /usr/local/etc/php/conf.d/uploads.ini \
+    && echo "post_max_size = 30G" >> /usr/local/etc/php/conf.d/uploads.ini \
+    && echo "memory_limit = 20G" >> /usr/local/etc/php/conf.d/uploads.ini \
     && echo "max_execution_time = 3600" >> /usr/local/etc/php/conf.d/uploads.ini \
     && echo "max_input_time = 3600" >> /usr/local/etc/php/conf.d/uploads.ini \
     && echo "file_uploads = On" >> /usr/local/etc/php/conf.d/uploads.ini

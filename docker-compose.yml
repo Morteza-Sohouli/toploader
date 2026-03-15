@@ -73,7 +73,7 @@ services:
       - -hooks-http=http://server:80/tus/hooks
       - -hooks-http-forward-headers=Cookie
       - -hooks-enabled-events=pre-create,post-finish
-      - -max-size=21474836480
+      - -max-size= ${MAX_FILE_SIZE}
     volumes:
       - ./data:/data
     depends_on:
