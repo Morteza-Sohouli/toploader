@@ -153,7 +153,7 @@
                 انواع فایل مجاز: {{ allowedFileTypes.join(", ").toUpperCase() }}
               </p>
               <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                حداکثر حجم: ۲۰ گیگابایت
+                حداکثر حجم: 30 گیگابایت
               </p>
               <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 آپلودها قابل ادامه هستند — حتی بعد از بستن مرورگر تا ۲۴ ساعت
@@ -941,7 +941,7 @@ const validateFile = (file: File): boolean => {
 
   const maxSize = 30 * 1024 * 1024 * 1024;
   if (file.size > maxSize) {
-    error.value = "حجم فایل بیش از ۲۰ گیگابایت است";
+    error.value = "حجم فایل بیش از 30 گیگابایت است";
     return false;
   }
 

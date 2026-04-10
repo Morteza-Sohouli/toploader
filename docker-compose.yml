@@ -87,6 +87,7 @@ services:
     ports:
       - "3000:80"
     environment:
+      MYSQL_HOST: mysql
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
@@ -104,7 +105,8 @@ services:
       - ${WP_UPLOADS_PATH_3}:/var/www/wp-uploads/domain3
       - ${WP_UPLOADS_PATH_4}:/var/www/wp-uploads/domain4
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
 
   mysql:
     image: mysql

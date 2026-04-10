@@ -679,9 +679,6 @@ class FileController extends Controller
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="' . htmlspecialchars($description, ENT_QUOTES, 'UTF-8') . '">
     <title>' . htmlspecialchars($title . ' | ' . $statusLabel, ENT_QUOTES, 'UTF-8') . '</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -847,6 +844,8 @@ class FileController extends Controller
         $response = $response->withHeader('X-Accel-Redirect', $internalUri);
         $response = $response->withHeader('X-Accel-Buffering', 'no');
         $response = $response->withHeader('Content-Length', '0');
+        $response = $response->withHeader('Content-Disposition', $this->buildContentDisposition($file->name));
+        $response = $response->withHeader('Content-Type', 'application/octet-stream');
         $response->getBody()->write('');
         return $response;
     }
@@ -982,6 +981,8 @@ class FileController extends Controller
         $response = $response->withHeader('X-Accel-Redirect', $internalUri);
         $response = $response->withHeader('X-Accel-Buffering', 'no');
         $response = $response->withHeader('Content-Length', '0');
+        $response = $response->withHeader('Content-Disposition', $this->buildContentDisposition($name));
+        $response = $response->withHeader('Content-Type', 'application/octet-stream');
         $response->getBody()->write('');
         return $response;
     }
