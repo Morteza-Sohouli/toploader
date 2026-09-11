@@ -56,6 +56,17 @@ export interface UserFilesResponse {
   };
 }
 
+export interface DeleteRequestItem {
+  id: number;
+  file_id: number;
+  filename: string;
+  reason: string | null;
+  status: "pending" | "approved" | "rejected";
+  admin_note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PendingUpload {
   id: string;
   filename: string;
@@ -407,6 +418,44 @@ export const fileApi = {
   cleanExpiredPendingUploads(): void {
     const items = loadPendingUploads(); // already filters expired
     savePendingUploads(items);
+  },
+
+  async requestFileDeletion(
+    fileId: number,
+    reason?: string,
+  ): Promise<{ success: boolean; data?: { message: string; request: any }; error?: string }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/files/${fileId}/delete-request`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: reason || null }),
+      });
+      const data = await response.json();
+      if (response.ok) return { success: true, data };
+      return { success: false, error: data.error || "خطای سرور" };
+    } catch {
+      return { success: false, error: "خطای شبکه" };
+    }
+  },
+
+  async getUserDeleteRequests(): Promise<{
+    success: boolean;
+    data?: { requests: DeleteRequestItem[] };
+    error?: string;
+  }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/files/delete-requests`, {
+        method: "GET",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await response.json();
+      if (response.ok) return { success: true, data };
+      return { success: false, error: data.error || "خطای سرور" };
+    } catch {
+      return { success: false, error: "خطای شبکه" };
+    }
   },
 
   async getUserFiles(

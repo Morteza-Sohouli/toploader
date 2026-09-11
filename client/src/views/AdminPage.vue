@@ -369,13 +369,14 @@
                   <td class="py-3 px-2 text-gray-500 text-xs">{{ formatDate(file.created_at) }}</td>
                   <td class="py-3 px-2">
                     <div class="flex gap-1">
-                      <a
-                        :href="getDownloadUrl(file)"
-                        target="_blank"
+                      <button
+                        type="button"
+                        @click="copyFileUrl(file)"
+                        title="کپی آدرس فایل"
                         class="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded text-xs hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors"
                       >
-                        دانلود
-                      </a>
+                        کپی آدرس
+                      </button>
                       <button
                         @click="confirmDeleteFile(file)"
                         class="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded text-xs hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
@@ -534,8 +535,324 @@
             </div>
           </div>
         </div>
+
+        <!-- Tab: Delete Requests -->
+        <div v-if="activeTab === 'delete-requests'">
+          <!-- Filter -->
+          <div class="card mb-4">
+            <div class="flex flex-wrap gap-3 items-center">
+              <span class="text-sm font-medium text-gray-600 dark:text-gray-400">فیلتر وضعیت:</span>
+              <button
+                v-for="s in deleteRequestStatuses"
+                :key="s.value"
+                @click="deleteRequestStatusFilter = s.value; fetchDeleteRequests(1)"
+                class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+                :class="deleteRequestStatusFilter === s.value
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'"
+              >
+                {{ s.label }}
+                <span v-if="s.value === 'pending' && pendingDeleteCount > 0" class="mr-1 px-1.5 py-0.5 bg-red-500 text-white rounded-full text-xs">{{ pendingDeleteCount }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Delete Requests Table -->
+          <div class="card overflow-x-auto">
+            <div v-if="isLoadingDeleteRequests" class="text-center py-12">
+              <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-primary-600 border-t-transparent"></div>
+              <p class="mt-3 text-gray-500">در حال بارگذاری...</p>
+            </div>
+
+            <div v-else-if="deleteRequests.length === 0" class="text-center py-12 text-gray-500">
+              <svg class="w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              <p>هیچ درخواست حذفی یافت نشد</p>
+            </div>
+
+            <table v-else class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-gray-200 dark:border-gray-700">
+                  <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">#</th>
+                  <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">نام فایل</th>
+                  <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">حجم</th>
+                  <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">کاربر</th>
+                  <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">دلیل</th>
+                  <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">وضعیت</th>
+                  <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">تاریخ</th>
+                  <th class="text-right py-3 px-2 font-medium text-gray-500 dark:text-gray-400">عملیات</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="dr in deleteRequests"
+                  :key="dr.id"
+                  class="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                >
+                  <td class="py-3 px-2 text-gray-500">#{{ dr.id }}</td>
+                  <td class="py-3 px-2 font-medium max-w-xs truncate" :title="dr.filename">{{ dr.filename }}</td>
+                  <td class="py-3 px-2 text-gray-600 dark:text-gray-400">{{ dr.file_size_formatted }}</td>
+                  <td class="py-3 px-2">{{ dr.username }}</td>
+                  <td class="py-3 px-2 text-gray-600 dark:text-gray-400 max-w-48 truncate" :title="dr.reason || ''">{{ dr.reason || '—' }}</td>
+                  <td class="py-3 px-2">
+                    <span
+                      class="px-2 py-0.5 rounded text-xs font-medium"
+                      :class="{
+                        'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400': dr.status === 'pending',
+                        'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400': dr.status === 'approved',
+                        'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400': dr.status === 'rejected',
+                      }"
+                    >
+                      {{ dr.status === 'pending' ? 'در انتظار' : dr.status === 'approved' ? 'تایید شده' : 'رد شده' }}
+                    </span>
+                  </td>
+                  <td class="py-3 px-2 text-gray-500 text-xs">{{ formatDate(dr.created_at) }}</td>
+                  <td class="py-3 px-2">
+                    <div v-if="dr.status === 'pending'" class="flex gap-1">
+                      <button
+                        @click="openApproveRejectModal(dr, 'approve')"
+                        class="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded text-xs hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors"
+                      >
+                        تایید
+                      </button>
+                      <button
+                        @click="openApproveRejectModal(dr, 'reject')"
+                        class="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded text-xs hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+                      >
+                        رد
+                      </button>
+                    </div>
+                    <span v-else class="text-gray-400 text-xs">
+                      {{ dr.admin_note ? dr.admin_note : '—' }}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <!-- Pagination -->
+            <div v-if="deleteRequestsPagination && deleteRequestsPagination.total_pages > 1" class="flex items-center justify-between mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <span class="text-sm text-gray-500">
+                صفحه {{ deleteRequestsPagination.current_page }} از {{ deleteRequestsPagination.total_pages }}
+                ({{ deleteRequestsPagination.total_requests }} درخواست)
+              </span>
+              <div class="flex gap-2">
+                <button
+                  @click="fetchDeleteRequests(deleteRequestsPagination.current_page - 1)"
+                  :disabled="!deleteRequestsPagination.has_prev"
+                  class="btn-secondary text-sm disabled:opacity-50"
+                >
+                  قبلی
+                </button>
+                <button
+                  @click="fetchDeleteRequests(deleteRequestsPagination.current_page + 1)"
+                  :disabled="!deleteRequestsPagination.has_next"
+                  class="btn-secondary text-sm disabled:opacity-50"
+                >
+                  بعدی
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: SSL -->
+        <div v-if="activeTab === 'ssl'" class="space-y-6">
+          <div class="card">
+            <h2 class="text-xl font-bold mb-4">وضعیت گواهی SSL</h2>
+
+            <div v-if="isLoadingSsl" class="text-center py-8">
+              <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-primary-600 border-t-transparent"></div>
+              <p class="mt-3 text-gray-500">در حال بارگذاری...</p>
+            </div>
+
+            <div v-else-if="sslError" class="text-center py-8 text-red-600 dark:text-red-400">
+              <p>{{ sslError }}</p>
+              <button @click="fetchSslInfo" class="btn-secondary mt-3 text-sm">تلاش مجدد</button>
+            </div>
+
+            <div v-else-if="sslInfo" class="space-y-4">
+              <!-- Not configured -->
+              <div v-if="!sslInfo.configured" class="p-4 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
+                <div class="flex items-start gap-3">
+                  <svg class="w-6 h-6 text-yellow-600 dark:text-yellow-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <div>
+                    <p class="font-medium text-yellow-800 dark:text-yellow-300">گواهی SSL نصب نشده</p>
+                    <p class="text-sm text-yellow-700 dark:text-yellow-400 mt-1">
+                      <span v-if="sslInfo.has_cert && !sslInfo.has_key">فایل cert.pem موجود است اما key.pem یافت نشد.</span>
+                      <span v-else-if="!sslInfo.has_cert && sslInfo.has_key">فایل key.pem موجود است اما cert.pem یافت نشد.</span>
+                      <span v-else>هر دو فایل cert.pem و key.pem در پوشه ssl یافت نشدند.</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Configured -->
+              <template v-else>
+                <!-- Expiry status banner -->
+                <div
+                  class="p-4 rounded-lg border"
+                  :class="sslStatusClass"
+                >
+                  <div class="flex items-center justify-between flex-wrap gap-4">
+                    <div class="flex items-center gap-3">
+                      <svg class="w-8 h-8 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                      </svg>
+                      <div>
+                        <p class="text-2xl font-bold">{{ sslDaysRemainingText }}</p>
+                        <p class="text-sm opacity-80">تا انقضای گواهی</p>
+                      </div>
+                    </div>
+                    <div class="text-left">
+                      <p class="text-sm opacity-80">تاریخ انقضا</p>
+                      <p class="font-medium">{{ formatSslDate(sslInfo.expires_at) }}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Certificate details -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div class="p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">دامنه اصلی</p>
+                    <p class="font-medium">{{ sslInfo.subject || '—' }}</p>
+                  </div>
+                  <div class="p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">صادرکننده</p>
+                    <p class="font-medium">{{ sslInfo.issuer || '—' }}</p>
+                  </div>
+                  <div class="p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">تاریخ شروع اعتبار</p>
+                    <p class="font-medium">{{ formatSslDate(sslInfo.valid_from) }}</p>
+                  </div>
+                  <div class="p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">تطابق کلید خصوصی</p>
+                    <p class="font-medium" :class="sslInfo.key_matches ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">
+                      {{ sslInfo.key_matches ? 'بله ✓' : 'خیر ✗' }}
+                    </p>
+                  </div>
+                </div>
+
+                <!-- SAN domains -->
+                <div v-if="sslInfo.domains && sslInfo.domains.length > 0" class="p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50">
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">دامنه‌های پوشش‌داده‌شده</p>
+                  <div class="flex flex-wrap gap-2">
+                    <span
+                      v-for="domain in sslInfo.domains"
+                      :key="domain"
+                      class="px-2 py-1 bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded text-sm"
+                    >
+                      {{ domain }}
+                    </span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Upload form -->
+          <div class="card">
+            <h2 class="text-xl font-bold mb-2">آپلود گواهی SSL</h2>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              فایل‌های گواهی (cert.pem) و کلید خصوصی (key.pem) را آپلود کنید. پس از آپلود، nginx به‌صورت خودکار reload می‌شود.
+            </p>
+
+            <div v-if="sslUploadError" class="p-3 mb-4 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg text-sm">
+              {{ sslUploadError }}
+            </div>
+
+            <div class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium mb-1">فایل گواهی (cert.pem)</label>
+                <input
+                  ref="certFileInput"
+                  type="file"
+                  accept=".pem,.crt,.cer"
+                  @change="onCertFileChange"
+                  class="block w-full text-sm text-gray-600 dark:text-gray-400
+                    file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0
+                    file:text-sm file:font-medium file:bg-primary-50 file:text-primary-700
+                    dark:file:bg-primary-900/30 dark:file:text-primary-300
+                    hover:file:bg-primary-100 dark:hover:file:bg-primary-900/50"
+                />
+                <p v-if="selectedCertFile" class="text-xs text-gray-500 mt-1">{{ selectedCertFile.name }}</p>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium mb-1">فایل کلید خصوصی (key.pem)</label>
+                <input
+                  ref="keyFileInput"
+                  type="file"
+                  accept=".pem,.key"
+                  @change="onKeyFileChange"
+                  class="block w-full text-sm text-gray-600 dark:text-gray-400
+                    file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0
+                    file:text-sm file:font-medium file:bg-primary-50 file:text-primary-700
+                    dark:file:bg-primary-900/30 dark:file:text-primary-300
+                    hover:file:bg-primary-100 dark:hover:file:bg-primary-900/50"
+                />
+                <p v-if="selectedKeyFile" class="text-xs text-gray-500 mt-1">{{ selectedKeyFile.name }}</p>
+              </div>
+
+              <div class="flex flex-wrap gap-3 pt-2">
+                <button
+                  @click="uploadSsl"
+                  :disabled="!selectedCertFile || !selectedKeyFile || isUploadingSsl"
+                  class="btn-primary disabled:opacity-50"
+                >
+                  {{ isUploadingSsl ? 'در حال آپلود...' : 'آپلود و اعمال' }}
+                </button>
+                <button
+                  v-if="sslInfo?.configured"
+                  @click="reloadSsl"
+                  :disabled="isReloadingSsl"
+                  class="btn-secondary disabled:opacity-50"
+                >
+                  {{ isReloadingSsl ? 'در حال reload...' : 'Reload nginx' }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
+
+    <!-- Approve/Reject Delete Request Modal -->
+    <Teleport to="body">
+      <div v-if="showApproveRejectModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @click.self="showApproveRejectModal = false">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+          <h3 class="text-xl font-bold" :class="approveRejectAction === 'approve' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">
+            {{ approveRejectAction === 'approve' ? 'تایید درخواست حذف' : 'رد درخواست حذف' }}
+          </h3>
+          <p class="text-gray-600 dark:text-gray-400 text-sm">
+            <span v-if="approveRejectAction === 'approve'">
+              آیا از حذف فایل <strong>{{ approveRejectTarget?.filename }}</strong> مطمئن هستید؟ این عمل غیرقابل بازگشت است.
+            </span>
+            <span v-else>
+              درخواست حذف فایل <strong>{{ approveRejectTarget?.filename }}</strong> رد می‌شود و فایل حفظ خواهد شد.
+            </span>
+          </p>
+          <div>
+            <label class="block text-sm font-medium mb-1">یادداشت ادمین (اختیاری)</label>
+            <input v-model="approveRejectNote" type="text" class="input-field w-full" placeholder="پیامی برای کاربر..." />
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button @click="showApproveRejectModal = false" class="btn-secondary">انصراف</button>
+            <button
+              @click="executeApproveReject"
+              :disabled="isSubmitting"
+              class="px-4 py-2 rounded-lg text-white transition-colors disabled:opacity-50"
+              :class="approveRejectAction === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'"
+            >
+              {{ isSubmitting ? 'در حال پردازش...' : (approveRejectAction === 'approve' ? 'تایید و حذف فایل' : 'رد درخواست') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- Create User Modal -->
     <Teleport to="body">
@@ -647,7 +964,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive } from "vue";
+import { ref, onMounted, reactive, computed } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "../store/auth";
 import { useThemeStore } from "../store/theme";
@@ -658,6 +975,9 @@ import {
   type AdminStatsResponse,
   type AdminFilesResponse,
   type AdminUsersResponse,
+  type AdminDeleteRequest,
+  type AdminDeleteRequestsResponse,
+  type AdminSslInfo,
 } from "../api/admin";
 
 const router = useRouter();
@@ -679,8 +999,10 @@ const tabs = [
   { id: "stats", label: "آمار" },
   { id: "files", label: "فایل‌ها" },
   { id: "users", label: "کاربران" },
+  { id: "delete-requests", label: "درخواست‌های حذف" },
+  { id: "ssl", label: "گواهی SSL" },
 ];
-const activeTab = ref("stats");
+const activeTab = ref<string>("stats");
 
 // ==================== TOAST ====================
 const toast = reactive({ show: false, message: "", type: "success" as "success" | "error" });
@@ -908,8 +1230,13 @@ async function executeDelete() {
 }
 
 // ==================== HELPERS ====================
-function getDownloadUrl(file: AdminFile) {
-  return file.download_url;
+async function copyFileUrl(file: AdminFile) {
+  try {
+    await navigator.clipboard.writeText(file.download_url);
+    showToast("آدرس فایل کپی شد");
+  } catch {
+    showToast("کپی آدرس فایل انجام نشد", "error");
+  }
 }
 
 function formatDate(dateString: string | undefined) {
@@ -922,11 +1249,188 @@ function formatDate(dateString: string | undefined) {
   }).format(date);
 }
 
+// ==================== DELETE REQUESTS ====================
+const deleteRequests = ref<AdminDeleteRequest[]>([]);
+const deleteRequestsPagination = ref<AdminDeleteRequestsResponse["pagination"] | null>(null);
+const isLoadingDeleteRequests = ref(false);
+const deleteRequestStatusFilter = ref<"" | "pending" | "approved" | "rejected">("pending");
+const pendingDeleteCount = ref(0);
+
+const deleteRequestStatuses = [
+  { value: "pending" as const, label: "در انتظار" },
+  { value: "approved" as const, label: "تایید شده" },
+  { value: "rejected" as const, label: "رد شده" },
+  { value: "" as const, label: "همه" },
+];
+
+async function fetchDeleteRequests(page = 1) {
+  isLoadingDeleteRequests.value = true;
+  const result = await adminApi.getDeleteRequests({
+    status: deleteRequestStatusFilter.value || undefined,
+    page,
+    limit: 30,
+  });
+  if (result.success && result.data) {
+    deleteRequests.value = result.data.requests;
+    deleteRequestsPagination.value = result.data.pagination;
+  } else {
+    showToast(result.error || "خطا در دریافت درخواست‌های حذف", "error");
+  }
+  isLoadingDeleteRequests.value = false;
+}
+
+async function fetchPendingDeleteCount() {
+  const result = await adminApi.getDeleteRequests({ status: "pending", limit: 1 });
+  if (result.success && result.data) {
+    pendingDeleteCount.value = result.data.pagination.total_requests;
+  }
+}
+
+// Approve/Reject modal
+const showApproveRejectModal = ref(false);
+const approveRejectAction = ref<"approve" | "reject">("approve");
+const approveRejectTarget = ref<AdminDeleteRequest | null>(null);
+const approveRejectNote = ref("");
+
+function openApproveRejectModal(dr: AdminDeleteRequest, action: "approve" | "reject") {
+  approveRejectTarget.value = dr;
+  approveRejectAction.value = action;
+  approveRejectNote.value = "";
+  showApproveRejectModal.value = true;
+}
+
+async function executeApproveReject() {
+  if (!approveRejectTarget.value) return;
+  isSubmitting.value = true;
+  const id = approveRejectTarget.value.id;
+  const note = approveRejectNote.value.trim() || undefined;
+  let result;
+  if (approveRejectAction.value === "approve") {
+    result = await adminApi.approveDeleteRequest(id, note);
+  } else {
+    result = await adminApi.rejectDeleteRequest(id, note);
+  }
+  isSubmitting.value = false;
+  if (result.success) {
+    showApproveRejectModal.value = false;
+    showToast(approveRejectAction.value === "approve" ? "فایل با موفقیت حذف شد" : "درخواست رد شد");
+    fetchDeleteRequests(deleteRequestsPagination.value?.current_page || 1);
+    fetchPendingDeleteCount();
+  } else {
+    showToast(result.error || "خطا در پردازش درخواست", "error");
+  }
+}
+
+// ==================== SSL ====================
+const sslInfo = ref<AdminSslInfo | null>(null);
+const isLoadingSsl = ref(false);
+const sslError = ref("");
+const sslUploadError = ref("");
+const isUploadingSsl = ref(false);
+const isReloadingSsl = ref(false);
+const selectedCertFile = ref<File | null>(null);
+const selectedKeyFile = ref<File | null>(null);
+const certFileInput = ref<HTMLInputElement | null>(null);
+const keyFileInput = ref<HTMLInputElement | null>(null);
+
+const sslStatusClass = computed(() => {
+  if (!sslInfo.value?.configured) return "";
+  if (sslInfo.value.is_expired) {
+    return "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300";
+  }
+  if (sslInfo.value.is_expiring_soon) {
+    return "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300";
+  }
+  return "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-800 dark:text-green-300";
+});
+
+const sslDaysRemainingText = computed(() => {
+  if (!sslInfo.value?.configured) return "";
+  const days = sslInfo.value.days_remaining ?? 0;
+  if (sslInfo.value.is_expired) {
+    const expiredDays = Math.abs(days);
+    return `${expiredDays} روز پیش منقضی شده`;
+  }
+  if (days === 0) return "امروز منقضی می‌شود";
+  return `${days} روز`;
+});
+
+async function fetchSslInfo() {
+  isLoadingSsl.value = true;
+  sslError.value = "";
+  const result = await adminApi.getSslInfo();
+  if (result.success && result.data) {
+    sslInfo.value = result.data;
+  } else {
+    sslError.value = result.error || "خطا در دریافت اطلاعات SSL";
+  }
+  isLoadingSsl.value = false;
+}
+
+function onCertFileChange(e: Event) {
+  const input = e.target as HTMLInputElement;
+  selectedCertFile.value = input.files?.[0] ?? null;
+  sslUploadError.value = "";
+}
+
+function onKeyFileChange(e: Event) {
+  const input = e.target as HTMLInputElement;
+  selectedKeyFile.value = input.files?.[0] ?? null;
+  sslUploadError.value = "";
+}
+
+async function uploadSsl() {
+  if (!selectedCertFile.value || !selectedKeyFile.value) return;
+  sslUploadError.value = "";
+  isUploadingSsl.value = true;
+  const result = await adminApi.uploadSsl(selectedCertFile.value, selectedKeyFile.value);
+  isUploadingSsl.value = false;
+  if (result.success && result.data) {
+    sslInfo.value = result.data.ssl;
+    selectedCertFile.value = null;
+    selectedKeyFile.value = null;
+    if (certFileInput.value) certFileInput.value.value = "";
+    if (keyFileInput.value) keyFileInput.value.value = "";
+    const msg = result.data.reloaded
+      ? "گواهی SSL با موفقیت آپلود و nginx reload شد"
+      : "گواهی SSL آپلود شد. لطفاً proxy را restart کنید.";
+    showToast(msg, result.data.reloaded ? "success" : "error");
+  } else {
+    sslUploadError.value = result.error || "خطا در آپلود گواهی";
+  }
+}
+
+async function reloadSsl() {
+  isReloadingSsl.value = true;
+  const result = await adminApi.reloadSsl();
+  isReloadingSsl.value = false;
+  if (result.success) {
+    showToast("nginx با موفقیت reload شد");
+  } else {
+    showToast(result.error || "خطا در reload nginx", "error");
+  }
+}
+
+function formatSslDate(dateString: string | undefined) {
+  if (!dateString) return "—";
+  const date = new Date(dateString);
+  return new Intl.DateTimeFormat("fa-IR", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 // ==================== INIT ====================
 onMounted(() => {
   fetchStats();
   fetchFiles();
   fetchUsers();
+  fetchDeleteRequests();
+  fetchPendingDeleteCount();
+  fetchSslInfo();
 });
 </script>
 

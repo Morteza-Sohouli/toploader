@@ -712,12 +712,36 @@
                     </p>
                   </div>
                 </div>
-                <button
-                  @click="copyToClipboardFromUrl(file.download_url)"
-                  class="btn-secondary text-xs px-3 py-1 whitespace-nowrap"
-                >
-                  لینک دانلود
-                </button>
+                <div class="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    @click="copyToClipboardFromUrl(file.download_url)"
+                    class="btn-secondary text-xs px-3 py-1 whitespace-nowrap"
+                  >
+                    لینک دانلود
+                  </button>
+                  <span
+                    v-if="getFileDeleteRequest(file.id)"
+                    class="text-xs px-2 py-1 rounded-lg whitespace-nowrap"
+                    :class="{
+                      'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400': getFileDeleteRequest(file.id)?.status === 'pending',
+                      'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400': getFileDeleteRequest(file.id)?.status === 'approved',
+                      'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400': getFileDeleteRequest(file.id)?.status === 'rejected',
+                    }"
+                  >
+                    {{
+                      getFileDeleteRequest(file.id)?.status === 'pending' ? 'درخواست حذف در انتظار'
+                      : getFileDeleteRequest(file.id)?.status === 'approved' ? 'حذف تایید شد'
+                      : 'درخواست رد شد'
+                    }}
+                  </span>
+                  <button
+                    v-if="!getFileDeleteRequest(file.id)"
+                    @click="openDeleteRequestModal(file)"
+                    class="text-xs px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors whitespace-nowrap"
+                  >
+                    درخواست حذف
+                  </button>
+                </div>
               </div>
             </div>
             <div
@@ -775,6 +799,37 @@
         </div>
       </div>
     </main>
+
+    <!-- Delete Request Modal -->
+    <Teleport to="body">
+      <div v-if="showDeleteRequestModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @click.self="showDeleteRequestModal = false">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+          <h3 class="text-xl font-bold text-red-600 dark:text-red-400">درخواست حذف فایل</h3>
+          <p class="text-sm text-gray-600 dark:text-gray-400">
+            درخواست حذف فایل <strong class="text-gray-800 dark:text-gray-200">{{ deleteRequestFilename }}</strong> ارسال خواهد شد. فایل پس از تأیید ادمین حذف می‌شود.
+          </p>
+          <div>
+            <label class="block text-sm font-medium mb-1">دلیل حذف (اختیاری)</label>
+            <textarea
+              v-model="deleteRequestReason"
+              rows="3"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none text-sm"
+              placeholder="دلیل درخواست حذف را بنویسید..."
+            />
+          </div>
+          <div class="flex justify-end gap-2 pt-1">
+            <button @click="showDeleteRequestModal = false" class="btn-secondary">انصراف</button>
+            <button
+              @click="submitDeleteRequest"
+              :disabled="isSubmittingDeleteRequest"
+              class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors disabled:opacity-50 text-sm font-medium"
+            >
+              {{ isSubmittingDeleteRequest ? 'در حال ارسال...' : 'ارسال درخواست' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -790,6 +845,7 @@ import {
   type PendingUpload,
   type TusUploadHandle,
 } from "../api/files";
+import type { DeleteRequestItem } from "../api/files";
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -1363,9 +1419,52 @@ const goToPrevPage = async () => {
   }
 };
 
+// ==================== DELETE REQUESTS ====================
+const myDeleteRequests = ref<DeleteRequestItem[]>([]);
+const showDeleteRequestModal = ref(false);
+const deleteRequestFileId = ref(0);
+const deleteRequestFilename = ref("");
+const deleteRequestReason = ref("");
+const isSubmittingDeleteRequest = ref(false);
+
+async function fetchMyDeleteRequests() {
+  const result = await fileApi.getUserDeleteRequests();
+  if (result.success && result.data) {
+    myDeleteRequests.value = result.data.requests;
+  }
+}
+
+function getFileDeleteRequest(fileId: number): DeleteRequestItem | undefined {
+  return myDeleteRequests.value.find((r) => r.file_id === fileId);
+}
+
+function openDeleteRequestModal(file: UserFile) {
+  deleteRequestFileId.value = file.id;
+  deleteRequestFilename.value = file.filename;
+  deleteRequestReason.value = "";
+  showDeleteRequestModal.value = true;
+}
+
+async function submitDeleteRequest() {
+  isSubmittingDeleteRequest.value = true;
+  const result = await fileApi.requestFileDeletion(
+    deleteRequestFileId.value,
+    deleteRequestReason.value.trim() || undefined,
+  );
+  isSubmittingDeleteRequest.value = false;
+  if (result.success) {
+    showDeleteRequestModal.value = false;
+    showNotification("درخواست حذف ارسال شد. در انتظار تایید ادمین", "success");
+    await fetchMyDeleteRequests();
+  } else {
+    showNotification(result.error || "خطا در ارسال درخواست", "error");
+  }
+}
+
 onMounted(() => {
   fileApi.cleanExpiredPendingUploads();
   refreshPendingUploads();
   fetchUserFiles();
+  fetchMyDeleteRequests();
 });
 </script>

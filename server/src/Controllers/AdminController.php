@@ -5,9 +5,10 @@ namespace App\Controllers;
 use App\Models\User;
 use App\Models\File;
 use App\Models\DownloadLog;
-use App\Service\SecureLinkService;
+use App\Models\DeleteRequest;
+use App\Service\FileLinkService;
+use App\Service\SslService;
 use App\Util\FormatHelper;
-use App\Util\RequestHelper;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -96,10 +97,9 @@ class AdminController extends Controller
             ->skip($offset)
             ->take($limit)
             ->get()
-            ->map(function ($file) use ($request) {
+            ->map(function ($file) {
                 $owner = User::find($file->owner);
                 $baseUrl = (string) (getenv('UPLOAD_URL') ?: '');
-                $userIp = RequestHelper::getClientIp($request) ?: null;
                 return [
                     'id' => $file->id,
                     'filename' => $file->name,
@@ -109,7 +109,7 @@ class AdminController extends Controller
                     'owner_id' => $file->owner,
                     'owner_name' => $owner ? $owner->username : 'Unknown',
                     'download_count' => (int) $file->download_count,
-                    'download_url' => SecureLinkService::generateSecureFileLink($file->id, $baseUrl, $userIp, $file->name),
+                    'download_url' => FileLinkService::generateUnsignedFileLink($file, $baseUrl),
                     'path' => $file->path,
                     'host' => $file->host ?? null,
                     'created_at' => $file->created_at,
@@ -370,6 +370,239 @@ class AdminController extends Controller
         return $this->json($response, [
             'message' => 'User "' . $username . '" deleted successfully. Their ' . $fileCount . ' file(s) have been kept (owner set to none).',
             'orphaned_files' => $fileCount,
+        ]);
+    }
+
+    // ==================== DELETE REQUEST ENDPOINTS ====================
+
+    /**
+     * Get all delete requests with optional status filter.
+     * GET /admin/delete-requests[?status=pending|approved|rejected]
+     */
+    public function getDeleteRequests(Request $request, Response $response): Response
+    {
+        $params = $request->getQueryParams();
+        $status = $params['status'] ?? null;
+        $page   = max(1, (int)($params['page'] ?? 1));
+        $limit  = max(1, min(100, (int)($params['limit'] ?? 30)));
+        $offset = ($page - 1) * $limit;
+
+        $query = DeleteRequest::query();
+
+        if ($status !== null && in_array($status, ['pending', 'approved', 'rejected'])) {
+            $query->where('status', $status);
+        }
+
+        $total = $query->count();
+
+        $requests = $query->orderBy('created_at', 'desc')
+            ->skip($offset)
+            ->take($limit)
+            ->get()
+            ->map(function ($dr) {
+                $file = File::find($dr->file_id);
+                $user = User::find($dr->user_id);
+                return [
+                    'id'         => $dr->id,
+                    'file_id'    => $dr->file_id,
+                    'filename'   => $file ? $file->name : 'حذف‌شده',
+                    'file_size'  => $file ? (int)$file->size : 0,
+                    'file_size_formatted' => $file ? FormatHelper::formatBytes((int)$file->size) : '-',
+                    'user_id'    => $dr->user_id,
+                    'username'   => $user ? $user->username : 'حذف‌شده',
+                    'reason'     => $dr->reason,
+                    'status'     => $dr->status,
+                    'admin_note' => $dr->admin_note,
+                    'created_at' => $dr->created_at,
+                    'updated_at' => $dr->updated_at,
+                ];
+            });
+
+        $totalPages = $total > 0 ? ceil($total / $limit) : 1;
+
+        return $this->json($response, [
+            'requests'   => $requests,
+            'pagination' => [
+                'current_page'  => $page,
+                'per_page'      => $limit,
+                'total_requests'=> $total,
+                'total_pages'   => $totalPages,
+                'has_next'      => $page < $totalPages,
+                'has_prev'      => $page > 1,
+            ],
+        ]);
+    }
+
+    /**
+     * Approve a delete request — deletes the file and marks request approved.
+     * POST /admin/delete-requests/{id}/approve  body: { admin_note?: string }
+     */
+    public function approveDeleteRequest(Request $request, Response $response, array $args): Response
+    {
+        $requestId = (int)($args['id'] ?? 0);
+        if ($requestId <= 0) {
+            return $this->json($response, ['error' => 'Request ID is required'], 400);
+        }
+
+        $dr = DeleteRequest::find($requestId);
+        if (!$dr) {
+            return $this->json($response, ['error' => 'Delete request not found'], 404);
+        }
+
+        if ($dr->status !== 'pending') {
+            return $this->json($response, ['error' => 'This request has already been ' . $dr->status], 409);
+        }
+
+        $file = File::find($dr->file_id);
+        if ($file) {
+            if (file_exists($file->path)) {
+                @unlink($file->path);
+            }
+            DownloadLog::where('file_id', $file->id)->delete();
+            $file->delete();
+        }
+
+        $body = $request->getParsedBody();
+        $adminNote = isset($body['admin_note']) ? trim((string)$body['admin_note']) : null;
+
+        $dr->status     = 'approved';
+        $dr->admin_note = $adminNote ?: null;
+        $dr->save();
+
+        return $this->json($response, [
+            'message' => 'Delete request approved. File has been deleted.',
+            'request_id' => $dr->id,
+        ]);
+    }
+
+    /**
+     * Reject a delete request — file is kept, request marked rejected.
+     * POST /admin/delete-requests/{id}/reject  body: { admin_note?: string }
+     */
+    public function rejectDeleteRequest(Request $request, Response $response, array $args): Response
+    {
+        $requestId = (int)($args['id'] ?? 0);
+        if ($requestId <= 0) {
+            return $this->json($response, ['error' => 'Request ID is required'], 400);
+        }
+
+        $dr = DeleteRequest::find($requestId);
+        if (!$dr) {
+            return $this->json($response, ['error' => 'Delete request not found'], 404);
+        }
+
+        if ($dr->status !== 'pending') {
+            return $this->json($response, ['error' => 'This request has already been ' . $dr->status], 409);
+        }
+
+        $body = $request->getParsedBody();
+        $adminNote = isset($body['admin_note']) ? trim((string)$body['admin_note']) : null;
+
+        $dr->status     = 'rejected';
+        $dr->admin_note = $adminNote ?: null;
+        $dr->save();
+
+        return $this->json($response, [
+            'message' => 'Delete request rejected. File has been kept.',
+            'request_id' => $dr->id,
+        ]);
+    }
+
+    // ==================== SSL ENDPOINTS ====================
+
+    /**
+     * Get SSL certificate status and expiry info.
+     * GET /admin/ssl
+     */
+    public function getSslInfo(Request $request, Response $response): Response
+    {
+        try
+        {
+            $ssl = new SslService();
+            $info = $ssl->getInfo();
+            return $this->json($response, $info);
+        }
+        catch (\Throwable $e)
+        {
+            return $this->json($response, ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Upload SSL certificate and private key (multipart: cert, key).
+     * POST /admin/ssl
+     */
+    public function uploadSsl(Request $request, Response $response): Response
+    {
+        $uploadedFiles = $request->getUploadedFiles();
+
+        if (empty($uploadedFiles['cert']) || empty($uploadedFiles['key']))
+        {
+            return $this->json($response, ['error' => 'Both certificate (cert) and private key (key) files are required'], 400);
+        }
+
+        $certFile = $uploadedFiles['cert'];
+        $keyFile = $uploadedFiles['key'];
+
+        if ($certFile->getError() !== UPLOAD_ERR_OK)
+        {
+            return $this->json($response, ['error' => 'Certificate upload error'], 400);
+        }
+        if ($keyFile->getError() !== UPLOAD_ERR_OK)
+        {
+            return $this->json($response, ['error' => 'Private key upload error'], 400);
+        }
+
+        $certStream = $certFile->getStream();
+        $keyStream = $keyFile->getStream();
+        if ($certStream->tell() > 0)
+        {
+            $certStream->rewind();
+        }
+        if ($keyStream->tell() > 0)
+        {
+            $keyStream->rewind();
+        }
+        $certContent = (string) $certStream->getContents();
+        $keyContent = (string) $keyStream->getContents();
+
+        try
+        {
+            $ssl = new SslService();
+            $result = $ssl->saveCertificates($certContent, $keyContent);
+            $info = $ssl->getInfo();
+            return $this->json($response, array_merge($result, ['ssl' => $info]));
+        }
+        catch (\InvalidArgumentException $e)
+        {
+            return $this->json($response, ['error' => $e->getMessage()], 400);
+        }
+        catch (\Throwable $e)
+        {
+            return $this->json($response, ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Reload nginx in the proxy container after SSL changes.
+     * POST /admin/ssl/reload
+     */
+    public function reloadSsl(Request $request, Response $response): Response
+    {
+        $ssl = new SslService();
+        $reloaded = $ssl->reloadNginxProxy();
+
+        if (!$reloaded)
+        {
+            return $this->json($response, [
+                'error' => 'Unable to reload nginx. Restart the proxy container manually.',
+                'reloaded' => false,
+            ], 500);
+        }
+
+        return $this->json($response, [
+            'message' => 'Nginx reloaded successfully',
+            'reloaded' => true,
         ]);
     }
 

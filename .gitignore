@@ -31,3 +31,4 @@ config/wp-domains.json
 ssl/*.pem
 ssl/*.key
 ssl/*.crt
+.codex/password-ssh/servers.json

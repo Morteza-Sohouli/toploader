@@ -9,12 +9,13 @@ RUN apt-get update && apt-get install -y \
     zip \
     unzip \
     nginx \
+    libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# PHP extensions for MySQL (cached)
-RUN docker-php-ext-install mysqli pdo pdo_mysql
+# PHP extensions for MySQL and curl (cached)
+RUN docker-php-ext-install mysqli pdo pdo_mysql curl
 
-# PHP upload limits (20GB)
+# PHP upload limits (30GB)
 RUN echo "upload_max_filesize = 30G" > /usr/local/etc/php/conf.d/uploads.ini \
     && echo "post_max_size = 30G" >> /usr/local/etc/php/conf.d/uploads.ini \
     && echo "memory_limit = 20G" >> /usr/local/etc/php/conf.d/uploads.ini \

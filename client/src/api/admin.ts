@@ -11,7 +11,7 @@ export interface AdminFile {
   owner_id: number;
   owner_name: string;
   download_count: number;
-  /** Full secure download URL (md5 + expires). */
+  /** Canonical file URL without authorization query values. */
   download_url: string;
   path: string;
   host: string | null;
@@ -53,6 +53,55 @@ export interface AdminUsersResponse {
     has_next: boolean;
     has_prev: boolean;
   };
+}
+
+export interface AdminDeleteRequest {
+  id: number;
+  file_id: number;
+  filename: string;
+  file_size: number;
+  file_size_formatted: string;
+  user_id: number;
+  username: string;
+  reason: string | null;
+  status: "pending" | "approved" | "rejected";
+  admin_note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminDeleteRequestsResponse {
+  requests: AdminDeleteRequest[];
+  pagination: {
+    current_page: number;
+    per_page: number;
+    total_requests: number;
+    total_pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+  };
+}
+
+export interface AdminSslInfo {
+  configured: boolean;
+  has_cert: boolean;
+  has_key: boolean;
+  subject?: string | null;
+  issuer?: string;
+  domains?: string[];
+  valid_from?: string;
+  expires_at?: string;
+  days_remaining?: number;
+  is_expired?: boolean;
+  is_expiring_soon?: boolean;
+  key_matches?: boolean;
+}
+
+export interface AdminSslUploadResponse {
+  success: boolean;
+  reloaded: boolean;
+  message: string;
+  ssl: AdminSslInfo;
 }
 
 export interface AdminStatsResponse {
@@ -203,5 +252,76 @@ export const adminApi = {
 
   async getStats(): Promise<{ success: boolean; data?: AdminStatsResponse; error?: string }> {
     return request<AdminStatsResponse>(`/admin/stats`);
+  },
+
+  // ==================== DELETE REQUESTS ====================
+
+  async getDeleteRequests(params: {
+    status?: "pending" | "approved" | "rejected";
+    page?: number;
+    limit?: number;
+  } = {}): Promise<{ success: boolean; data?: AdminDeleteRequestsResponse; error?: string }> {
+    const searchParams = new URLSearchParams();
+    if (params.status) searchParams.set("status", params.status);
+    if (params.page) searchParams.set("page", params.page.toString());
+    if (params.limit) searchParams.set("limit", params.limit.toString());
+    return request<AdminDeleteRequestsResponse>(`/admin/delete-requests?${searchParams.toString()}`);
+  },
+
+  async approveDeleteRequest(
+    id: number,
+    adminNote?: string,
+  ): Promise<{ success: boolean; data?: { message: string }; error?: string }> {
+    return request(`/admin/delete-requests/${id}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ admin_note: adminNote || null }),
+    });
+  },
+
+  async rejectDeleteRequest(
+    id: number,
+    adminNote?: string,
+  ): Promise<{ success: boolean; data?: { message: string }; error?: string }> {
+    return request(`/admin/delete-requests/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ admin_note: adminNote || null }),
+    });
+  },
+
+  // ==================== SSL ====================
+
+  async getSslInfo(): Promise<{ success: boolean; data?: AdminSslInfo; error?: string }> {
+    return request<AdminSslInfo>(`/admin/ssl`);
+  },
+
+  async uploadSsl(
+    cert: File,
+    key: File,
+  ): Promise<{ success: boolean; data?: AdminSslUploadResponse; error?: string }> {
+    try {
+      const formData = new FormData();
+      formData.append("cert", cert);
+      formData.append("key", key);
+
+      const response = await fetch(`${API_BASE_URL}/admin/ssl`, {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return { success: false, error: data.error || "خطای سرور" };
+      }
+
+      return { success: true, data };
+    } catch (error: any) {
+      return { success: false, error: error.message || "خطای شبکه" };
+    }
+  },
+
+  async reloadSsl(): Promise<{ success: boolean; data?: { message: string; reloaded: boolean }; error?: string }> {
+    return request(`/admin/ssl/reload`, { method: "POST" });
   },
 };

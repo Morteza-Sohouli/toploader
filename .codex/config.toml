@@ -1,0 +1,8 @@
+[mcp_servers.ssh]
+command = "node"
+args = [ "C:\\Users\\Gary\\Documents\\Codex\\2026-09-03\\wt\\ssh-mcp\\dist\\index.js" ]
+startup_timeout_sec = 30
+
+[mcp_servers.ssh.env]
+SSH_MCP_CONFIG = "C:\\Users\\Gary\\AppData\\Roaming\\ssh-mcp\\config.json"
+SSH_MCP_PROFILE = "topload"

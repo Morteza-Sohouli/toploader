@@ -94,11 +94,12 @@ services:
       UPLOAD_URL: ${UPLOAD_URL}
       MAX_FILE_SIZE: ${MAX_FILE_SIZE}
       SECURE_LINK_SECRET: ${SECURE_LINK_SECRET}
+      SSL_DIR: /ssl
     volumes:
       - ./server:/var/www/html
       - ./data:/data
-      # Domain-to-path config (read by PHP to resolve Host → uploads dir)
-      - ./config/wp-domains.json:/var/www/config/wp-domains.json:ro
+      - ./ssl:/ssl
+      - /var/run/docker.sock:/var/run/docker.sock
       # WordPress uploads: one bind-mount per domain (paths from .env, targets match config/wp-domains.json)
       - ${WP_UPLOADS_PATH_1}:/var/www/wp-uploads/domain1
       - ${WP_UPLOADS_PATH_2}:/var/www/wp-uploads/domain2

@@ -191,7 +191,7 @@ Upload a file with type validation based on user's allowed file types.
 - Archives: `zip`, `rar`
 - Media: `mp3`, `mp4`
 
-**File Size Limit:** 20GB
+**File Size Limit:** 30GB
 
 **Success Response (201):**
 
@@ -222,23 +222,34 @@ Upload a file with type validation based on user's allowed file types.
 
 ### 8. Serve File
 
-**GET /files/serve?id={file_id}&hash={hash}**
+New download links use a signed storage-relative path. Existing ID links remain supported.
 
-Serve a file securely using its ID and access hash.
+**Canonical paths:**
 
-**Authentication:** Required
+- Native uploads: `GET /uploads/new/{yyyy}/{mm}/{dd}/{stored_name}?md5=...&expires=...`
+- Legacy native uploads: `GET /uploads/{user_id}/{yyyy}/{mm}/{dd}/{stored_name}?md5=...&expires=...`
+- WordPress uploads: `GET /wp-content/uploads/{relative_path}?md5=...&expires=...`
+
+**Backward-compatible ID paths:**
+
+- `GET /files/serve/{file_id}?md5=...&expires=...`
+- `GET /files/serve?id={file_id}&md5=...&expires=...`
+
+Download endpoints are public, but every request requires a valid signed URL.
+The admin file-list response is an exception: its `download_url` contains only
+the canonical URL, without `md5`, `expires`, or other authorization values, so
+the downstream admin service can add its own credentials.
 
 **Query Parameters:**
 
-- `id` (required): The file ID
-- `hash` (required): The access hash generated during upload
+- `md5` (required): URL-safe signature for the exact download path
+- `expires` (required): Signature expiry as a Unix timestamp
 
 **Success Response:** File content with appropriate headers
 
 **Error Responses:**
 
-- `400`: Missing ID or hash
-- `401`: Not authenticated
+- `400`: Missing path/ID or signing parameters
 - `403`: Invalid hash or access denied
 - `404`: File not found
 
@@ -264,7 +275,7 @@ All error responses follow this format:
 2. During upload, system checks:
    - File extension matches user's allowed types
    - MIME type matches extension
-   - File size ≤ 20GB
+   - File size ≤ 30GB
    - File is not empty
 
 ### Default Allowed Types
@@ -401,8 +412,8 @@ CREATE TABLE users (
 - **Session-based authentication** with middleware protection
 - **File type validation** against user permissions
 - **MIME type verification** to prevent extension spoofing
-- **File size limits** (20GB max)
-- **User isolation** - files stored in separate directories
+- **File size limits** (30GB max)
+- **Storage isolation** - public paths are resolved only inside configured upload roots
 - **Filename sanitization** with unique identifiers
 - **Memory-efficient streaming** for large files
 - **Apache security rules** preventing script execution in uploads
@@ -425,7 +436,7 @@ docker-compose up --build
 ```bash
 cd server
 composer install
-# Configure php.ini for 20GB uploads
+# Configure php.ini for 30GB uploads
 # Start Apache/Nginx with PHP
 ```
 

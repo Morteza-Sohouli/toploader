@@ -5,7 +5,9 @@ namespace App\Controllers;
 use App\Models\User;
 use App\Models\File;
 use App\Models\DownloadLog;
+use App\Models\DeleteRequest;
 use App\Service\MimeTypeMap;
+use App\Service\FileLinkService;
 use App\Service\SecureLinkService;
 use App\Util\FormatHelper;
 use App\Util\RequestHelper;
@@ -18,68 +20,37 @@ class FileController extends Controller
     private const UPLOAD_DIR = __DIR__ . '/../../uploads/';
     private const TUS_DATA_DIR = '/data/tus-data/';
 
-    /**
-     * Generate a secure download URL for a file by ID (flows from list/upload).
-     * Delegates to SecureLinkService for compatibility with AdminController and external callers.
-     */
+    /** Generate the canonical path link, falling back to the legacy ID link. */
     public static function generateSecureFileLink(int $fileId, string $baseUrl, ?string $userIp = null, ?string $fileName = null): string
     {
+        $file = File::find($fileId);
+        if ($file) {
+            return FileLinkService::generateSecureFileLink($file, $baseUrl, $userIp, $fileName);
+        }
         return SecureLinkService::generateSecureFileLink($fileId, $baseUrl, $userIp, $fileName);
     }
 
-    /** Cached domain-to-uploads-path map loaded from config/wp-domains.json */
-    private static ?array $wpDomainsMap = null;
-
     /**
-     * Load the domain → uploads-path mapping from wp-domains.json (cached after first call).
+     * Decode and normalize the uploads path for filesystem lookup.
+     * Handles percent-encoded UTF-8 filenames and restores woocommerce_uploads/ when a
+     * dedicated route stripped that prefix from the captured segment.
      */
-    private static function loadWpDomainsMap(): array
+    private static function normalizeWpUploadPath(string $requestedPath, string $uriPath): string
     {
-        if (self::$wpDomainsMap === null) {
-            // Mounted into the container at /var/www/config/wp-domains.json
-            $configPath = '/var/www/config/wp-domains.json';
-            if (!is_file($configPath)) {
-                // Fallback: relative to project root (local dev without Docker)
-                $configPath = __DIR__ . '/../../config/wp-domains.json';
-            }
-            if (is_file($configPath)) {
-                $json = file_get_contents($configPath);
-                self::$wpDomainsMap = json_decode($json, true) ?: [];
-            } else {
-                self::$wpDomainsMap = [];
-            }
-        }
-        return self::$wpDomainsMap;
-    }
+        $requestedPath = rawurldecode($requestedPath);
+        $uriPath = rawurldecode($uriPath);
 
-    /**
-     * Sanitize domain for nginx internal location prefix (must match generate-nginx-internal-wp.php).
-     * Used for X-Accel-Redirect: /internal_wp_<sanitized>/...
-     */
-    private static function sanitizeDomainForInternal(string $domain): string
-    {
-        return strtolower(str_replace('.', '_', $domain));
-    }
-
-    /**
-     * Resolve the WP uploads base directory for the given request host.
-     * Looks up the host in config/wp-domains.json; falls back to WP_UPLOADS_PATH env or default path.
-     */
-    private static function getWpUploadsBase(string $host = ''): string
-    {
-        $map = self::loadWpDomainsMap();
-
-        // Strip port if present (e.g. "domain.com:443" → "domain.com")
-        $domain = strtolower(explode(':', $host)[0]);
-
-        if ($domain !== '' && isset($map[$domain])) {
-            return rtrim($map[$domain], '/\\');
+        if (
+         preg_match('#/(?:uploads|wp-content/uploads)/woocommerce_uploads/#', $uriPath)
+         && !str_starts_with($requestedPath, 'woocommerce_uploads/')
+        )
+        {
+            $requestedPath = 'woocommerce_uploads/' . ltrim($requestedPath, '/');
         }
 
-        // Fallback to single-path env var (backward compatibility)
-        $base = getenv('WP_UPLOADS_PATH');
-        return $base !== false && $base !== '' ? rtrim($base, '/\\') : (__DIR__ . '/../../wp-content/uploads');
+        return $requestedPath;
     }
+
     /**
      * Generate an HMAC-SHA256 signed upload token for TUS uploads.
      * Token encodes user_id, allowed file types, max size, and expiry.
@@ -87,7 +58,8 @@ class FileController extends Controller
     public function createUploadToken(Request $request, Response $response): Response
     {
         $user = User::find($_SESSION['user_id']);
-        if (!$user) {
+        if (!$user)
+        {
             return $this->json($response, ['error' => 'User not found'], 404);
         }
 
@@ -112,24 +84,29 @@ class FileController extends Controller
     private static function verifyUploadToken(string $token): ?array
     {
         $parts = explode('.', $token, 2);
-        if (count($parts) !== 2) {
+        if (count($parts) !== 2)
+        {
             return null;
         }
         [$payloadB64, $signature] = $parts;
         $expected = hash_hmac('sha256', $payloadB64, SecureLinkService::getHmacSecret());
-        if (!hash_equals($expected, $signature)) {
+        if (!hash_equals($expected, $signature))
+        {
             return null;
         }
         $padded = str_pad(strtr($payloadB64, '-_', '+/'), strlen($payloadB64) + (4 - strlen($payloadB64) % 4) % 4, '=');
         $json = base64_decode($padded, true);
-        if ($json === false) {
+        if ($json === false)
+        {
             return null;
         }
         $payload = json_decode($json, true);
-        if (!is_array($payload) || !isset($payload['expires_at'])) {
+        if (!is_array($payload) || !isset($payload['expires_at']))
+        {
             return null;
         }
-        if ($payload['expires_at'] < time()) {
+        if ($payload['expires_at'] < time())
+        {
             return null;
         }
         return $payload;
@@ -141,15 +118,18 @@ class FileController extends Controller
     private static function parseTusMetadata(string $raw): array
     {
         $result = [];
-        foreach (explode(',', $raw) as $pair) {
+        foreach (explode(',', $raw) as $pair)
+        {
             $pair = trim($pair);
-            if ($pair === '') {
+            if ($pair === '')
+            {
                 continue;
             }
             $parts = explode(' ', $pair, 2);
             $key = $parts[0];
             $value = isset($parts[1]) ? base64_decode($parts[1], true) : '';
-            if ($value === false) {
+            if ($value === false)
+            {
                 $value = '';
             }
             $result[$key] = $value;
@@ -181,18 +161,21 @@ class FileController extends Controller
         // Slim's body parsing middleware may have already consumed the stream,
         // so prefer getParsedBody(); fall back to reading the raw stream.
         $data = $request->getParsedBody();
-        if (!is_array($data)) {
+        if (!is_array($data))
+        {
             $body = (string)$request->getBody();
             $data = json_decode($body, true);
         }
-        if (!is_array($data)) {
+        if (!is_array($data))
+        {
             return $this->json($response, ['ok' => true]);
         }
 
         $type = $data['Type'] ?? '';
         $upload = $data['Event']['Upload'] ?? [];
 
-        switch ($type) {
+        switch ($type)
+        {
             case 'pre-create':
                 return $this->tusPreCreate($response, $upload);
             case 'post-finish':
@@ -209,30 +192,36 @@ class FileController extends Controller
         $filename = $metaRaw['filename'] ?? '';
         $uploadSize = (int)($upload['Size'] ?? 0);
 
-        if ($token === '') {
+        if ($token === '')
+        {
             return $this->tusReject($response, 'Missing upload token', 403);
         }
 
         $payload = self::verifyUploadToken($token);
-        if ($payload === null) {
+        if ($payload === null)
+        {
             return $this->tusReject($response, 'Invalid or expired upload token', 403);
         }
 
-        if ($uploadSize > ($payload['max_size'] ?? self::MAX_FILE_SIZE)) {
+        if ($uploadSize > ($payload['max_size'] ?? self::MAX_FILE_SIZE))
+        {
             return $this->tusReject($response, 'File too large');
         }
 
-        if ($uploadSize === 0) {
+        if ($uploadSize === 0)
+        {
             return $this->tusReject($response, 'File is empty');
         }
 
         $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-        if ($extension === '') {
+        if ($extension === '')
+        {
             return $this->tusReject($response, 'File has no extension');
         }
 
         $allowedTypes = $this->parseAllowedFileTypes($payload['allowed_types'] ?? '');
-        if (!empty($allowedTypes) && !in_array($extension, $allowedTypes)) {
+        if (!empty($allowedTypes) && !in_array($extension, $allowedTypes))
+        {
             return $this->tusReject($response, 'File type "' . $extension . '" not allowed. Allowed: ' . implode(', ', $allowedTypes));
         }
 
@@ -252,7 +241,8 @@ class FileController extends Controller
         $tusInfoPath = ($upload['Storage']['InfoPath'] ?? '') ?: ($tusFilePath . '.info');
 
         $payload = self::verifyUploadToken($token);
-        if ($payload === null) {
+        if ($payload === null)
+        {
             error_log('[TUS post-finish] Invalid token for upload ' . $uploadId);
             return $this->json($response, ['ok' => true]);
         }
@@ -261,10 +251,11 @@ class FileController extends Controller
         $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION)) ?: 'bin';
         $sanitizedFilename = $this->generateSafeFilename($filename, $extension);
 
-        $userUploadDir = self::UPLOAD_DIR . $userId . '/';
+        $canonicalUploadDir = self::UPLOAD_DIR . 'new/';
         $datePath = date('Y/m/d') . '/';
-        $datedUploadDir = $userUploadDir . $datePath;
-        if (!is_dir($datedUploadDir)) {
+        $datedUploadDir = $canonicalUploadDir . $datePath;
+        if (!is_dir($datedUploadDir))
+        {
             mkdir($datedUploadDir, 0755, true);
         }
 
@@ -273,23 +264,28 @@ class FileController extends Controller
         // Skip file_exists() — PHP's realpath/stat cache is unreliable for files
         // created by external processes. Just attempt the move directly.
         $moved = @rename($tusFilePath, $targetPath);
-        if (!$moved) {
+        if (!$moved)
+        {
             $moved = @copy($tusFilePath, $targetPath);
-            if ($moved) {
+            if ($moved)
+            {
                 @unlink($tusFilePath);
             }
         }
 
-        if (!$moved) {
+        if (!$moved)
+        {
             error_log('[TUS post-finish] Failed to move ' . $tusFilePath . ' -> ' . $targetPath . ' error: ' . error_get_last()['message'] ?? 'unknown');
             return $this->json($response, ['ok' => true]);
         }
 
-        if (file_exists($tusInfoPath)) {
+        if (file_exists($tusInfoPath))
+        {
             @unlink($tusInfoPath);
         }
 
-        try {
+        try
+        {
             $fileRecord = File::create([
                 'owner' => $userId,
                 'name' => $sanitizedFilename,
@@ -297,18 +293,21 @@ class FileController extends Controller
                 'size' => $fileSize,
                 'path' => $targetPath,
                 // get domain
-                'host' => parse_url($_ENV['UPLOAD_URL'] ?? '', PHP_URL_HOST) ?: 'unknown',
+                'host' => parse_url((string)(getenv('UPLOAD_URL') ?: ($_ENV['UPLOAD_URL'] ?? '')), PHP_URL_HOST) ?: 'unknown',
             ]);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e)
+        {
             error_log('[TUS post-finish] DB error: ' . $e->getMessage());
-            if (file_exists($targetPath)) {
+            if (file_exists($targetPath))
+            {
                 @unlink($targetPath);
             }
             return $this->json($response, ['ok' => true]);
         }
 
-        $baseUrl = (string)($_ENV['UPLOAD_URL'] ?? '');
-        $downloadUrl = SecureLinkService::generateSecureFileLink($fileRecord->id, $baseUrl, null, $filename);
+        $baseUrl = (string)(getenv('UPLOAD_URL') ?: ($_ENV['UPLOAD_URL'] ?? ''));
+        $downloadUrl = FileLinkService::generateSecureFileLink($fileRecord, $baseUrl, null, $filename);
 
         $resultPath = self::TUS_DATA_DIR . $uploadId . '.result.json';
         file_put_contents($resultPath, json_encode([
@@ -331,36 +330,41 @@ class FileController extends Controller
     public function getTusUploadResult(Request $request, Response $response, array $args): Response
     {
         $uploadId = $args['uploadId'] ?? '';
-        if ($uploadId === '' || preg_match('/[^a-zA-Z0-9_+-]/', $uploadId)) {
+        if ($uploadId === '' || preg_match('/[^a-zA-Z0-9_+-]/', $uploadId))
+        {
             return $this->json($response, ['error' => 'Invalid upload ID'], 400);
         }
 
         $resultPath = self::TUS_DATA_DIR . $uploadId . '.result.json';
-        if (!file_exists($resultPath)) {
+        if (!file_exists($resultPath))
+        {
             return $this->json($response, ['error' => 'Upload result not found'], 404);
         }
 
         $result = json_decode(file_get_contents($resultPath), true);
-        if (!is_array($result)) {
+        if (!is_array($result))
+        {
             return $this->json($response, ['error' => 'Corrupt result file'], 500);
         }
 
         // Verify the requesting user owns this file
         $user = User::find($_SESSION['user_id'] ?? 0);
-        if (!$user) {
+        if (!$user)
+        {
             return $this->json($response, ['error' => 'Unauthorized'], 401);
         }
 
         $fileRecord = File::find($result['file_id'] ?? 0);
-        if (!$fileRecord || (int)$fileRecord->owner !== (int)$user->id) {
+        if (!$fileRecord || (int)$fileRecord->owner !== (int)$user->id)
+        {
             return $this->json($response, ['error' => 'Unauthorized'], 403);
         }
 
         // Refresh the download URL with current client IP
-        $baseUrl = (string)($_ENV['UPLOAD_URL'] ?? '');
+        $baseUrl = (string)(getenv('UPLOAD_URL') ?: ($_ENV['UPLOAD_URL'] ?? ''));
         $clientIp = RequestHelper::getClientIp($request) ?: null;
         $fileName = $result['original_name'] ?? $fileRecord->name;
-        $result['download_url'] = SecureLinkService::generateSecureFileLink($fileRecord->id, $baseUrl, $clientIp, $fileName);
+        $result['download_url'] = FileLinkService::generateSecureFileLink($fileRecord, $baseUrl, $clientIp, $fileName);
 
         // Clean up result file after retrieval
         @unlink($resultPath);
@@ -372,21 +376,24 @@ class FileController extends Controller
     {
         // Get authenticated user (authentication already verified by middleware)
         $user = User::find($_SESSION['user_id']);
-        if (!$user) {
+        if (!$user)
+        {
             return $this->json($response, ['error' => 'User not found'], 404);
         }
 
         // Get uploaded files
         $uploadedFiles = $request->getUploadedFiles();
 
-        if (empty($uploadedFiles['file'])) {
+        if (empty($uploadedFiles['file']))
+        {
             return $this->json($response, ['error' => 'No file uploaded'], 400);
         }
 
         $uploadedFile = $uploadedFiles['file'];
 
         // Check for upload errors
-        if ($uploadedFile->getError() !== UPLOAD_ERR_OK) {
+        if ($uploadedFile->getError() !== UPLOAD_ERR_OK)
+        {
             return $this->json($response, ['error' => 'File upload error: ' . $this->getUploadErrorMessage($uploadedFile->getError())], 400);
         }
 
@@ -395,27 +402,31 @@ class FileController extends Controller
         $fileSize = $uploadedFile->getSize();
 
         // Validate file size
-        if ($fileSize > self::MAX_FILE_SIZE) {
+        if ($fileSize > self::MAX_FILE_SIZE)
+        {
             return $this->json($response, [
                 'error' => 'File size exceeds maximum allowed size of ' . (FormatHelper::formatBytes(self::MAX_FILE_SIZE))
             ], 400);
         }
 
-        if ($fileSize === 0) {
+        if ($fileSize === 0)
+        {
             return $this->json($response, ['error' => 'Uploaded file is empty'], 400);
         }
 
         // Get file extension
         $fileExtension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
 
-        if (empty($fileExtension)) {
+        if (empty($fileExtension))
+        {
             return $this->json($response, ['error' => 'File has no extension'], 400);
         }
 
         // Validate file type against user's allowed file types
         $allowedFileTypes = $this->parseAllowedFileTypes($user->allowedFileTypes);
 
-        if (!in_array($fileExtension, $allowedFileTypes)) {
+        if (!in_array($fileExtension, $allowedFileTypes))
+        {
             return $this->json($response, [
                 'error' => 'File type "' . $fileExtension . '" is not allowed. Allowed types: ' . implode(', ', $allowedFileTypes)
             ], 400);
@@ -423,27 +434,31 @@ class FileController extends Controller
 
         // Additional MIME type validation for extra security
         $mimeType = $uploadedFile->getClientMediaType();
-        if (!MimeTypeMap::isValidMimeType($mimeType, $fileExtension)) {
+        if (!MimeTypeMap::isValidMimeType($mimeType, $fileExtension))
+        {
             return $this->json($response, [
                 'error' => 'File MIME type does not match extension'
             ], 400);
         }
 
         // Create upload directory if it doesn't exist
-        if (!is_dir(self::UPLOAD_DIR)) {
+        if (!is_dir(self::UPLOAD_DIR))
+        {
             mkdir(self::UPLOAD_DIR, 0755, true);
         }
 
-        // Create user-specific subdirectory
-        $userUploadDir = self::UPLOAD_DIR . $user->id . '/';
-        if (!is_dir($userUploadDir)) {
-            mkdir($userUploadDir, 0755, true);
+        // New uploads share a collision-safe canonical namespace.
+        $canonicalUploadDir = self::UPLOAD_DIR . 'new/';
+        if (!is_dir($canonicalUploadDir))
+        {
+            mkdir($canonicalUploadDir, 0755, true);
         }
 
         // Create date-based subdirectory: YYYY/MM/DD
         $datePath = date('Y/m/d') . '/';
-        $datedUploadDir = $userUploadDir . $datePath;
-        if (!is_dir($datedUploadDir)) {
+        $datedUploadDir = $canonicalUploadDir . $datePath;
+        if (!is_dir($datedUploadDir))
+        {
             mkdir($datedUploadDir, 0755, true);
         }
 
@@ -452,9 +467,12 @@ class FileController extends Controller
         $targetPath = $datedUploadDir . $sanitizedFilename;
 
         // Move uploaded file using streaming (memory-efficient for large files)
-        try {
+        try
+        {
             $uploadedFile->moveTo($targetPath);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e)
+        {
             return $this->json($response, [
                 'error' => 'Failed to save file: ' . $e->getMessage()
             ], 500);
@@ -462,7 +480,8 @@ class FileController extends Controller
 
         // Save file metadata to database
         $host = $request->getHeaderLine('Host');
-        try {
+        try
+        {
             $fileRecord = File::create([
                 'owner' => $user->id,
                 'name' => $sanitizedFilename,
@@ -471,9 +490,12 @@ class FileController extends Controller
                 'path' => $targetPath,
                 'host' => $host !== '' ? $host : null,
             ]);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e)
+        {
             // If database save fails, try to delete the uploaded file
-            if (file_exists($targetPath)) {
+            if (file_exists($targetPath))
+            {
                 unlink($targetPath);
             }
             return $this->json($response, [
@@ -492,9 +514,9 @@ class FileController extends Controller
                 'extension' => $fileExtension,
                 'mime_type' => $mimeType,
                 'uploaded_at' => $fileRecord->created_at,
-                'download_url' => SecureLinkService::generateSecureFileLink(
-                    $fileRecord->id,
-                    (string)($_ENV['UPLOAD_URL'] ?? ''),
+                'download_url' => FileLinkService::generateSecureFileLink(
+                    $fileRecord,
+                    (string)(getenv('UPLOAD_URL') ?: ($_ENV['UPLOAD_URL'] ?? '')),
                     RequestHelper::getClientIp($request) ?: null,
                     $filename
                 )
@@ -507,7 +529,8 @@ class FileController extends Controller
      */
     private function parseAllowedFileTypes(?string $allowedFileTypes): array
     {
-        if (empty($allowedFileTypes)) {
+        if (empty($allowedFileTypes))
+        {
             return [];
         }
 
@@ -541,7 +564,8 @@ class FileController extends Controller
      */
     private function getUploadErrorMessage(int $errorCode): string
     {
-        switch ($errorCode) {
+        switch ($errorCode)
+        {
             case UPLOAD_ERR_INI_SIZE:
                 return 'File exceeds upload_max_filesize directive in php.ini';
             case UPLOAD_ERR_FORM_SIZE:
@@ -580,7 +604,8 @@ class FileController extends Controller
     {
         // Get authenticated user
         $user = \App\Models\User::find($_SESSION['user_id']);
-        if (!$user) {
+        if (!$user)
+        {
             return $this->json($response, ['error' => 'User not found'], 404);
         }
 
@@ -603,18 +628,22 @@ class FileController extends Controller
         $query = \App\Models\File::where('owner', $user->id);
 
         // Apply search filter
-        if ($search !== null && trim($search) !== '') {
-            $query->where(function ($q) use ($search) {
+        if ($search !== null && trim($search) !== '')
+        {
+            $query->where(function ($q) use ($search)
+            {
                 $q->where('name', 'LIKE', '%' . $search . '%');
             });
         }
 
         // Apply date range filters
-        if ($fromDate !== null && trim($fromDate) !== '') {
+        if ($fromDate !== null && trim($fromDate) !== '')
+        {
             $query->where('created_at', '>=', $fromDate . ' 00:00:00');
         }
 
-        if ($toDate !== null && trim($toDate) !== '') {
+        if ($toDate !== null && trim($toDate) !== '')
+        {
             $query->where('created_at', '<=', $toDate . ' 23:59:59');
         }
 
@@ -626,8 +655,9 @@ class FileController extends Controller
             ->skip($offset)
             ->take($limit)
             ->get()
-            ->map(function ($file) use ($user, $request) {
-                $baseUrl = (string)($_ENV['UPLOAD_URL'] ?? '');
+            ->map(function ($file) use ($user, $request)
+            {
+                $baseUrl = (string)(getenv('UPLOAD_URL') ?: ($_ENV['UPLOAD_URL'] ?? ''));
                 $userIp = RequestHelper::getClientIp($request) ?: null;
                 return [
                     'id' => $file->id,
@@ -637,7 +667,7 @@ class FileController extends Controller
                     'file_size_formatted' => FormatHelper::formatBytes($file->size),
                     'mime_type' => $file->type,
                     'file_path' => $file->path,
-                    'download_url' => SecureLinkService::generateSecureFileLink($file->id, $baseUrl, $userIp, $file->name),
+                    'download_url' => FileLinkService::generateSecureFileLink($file, $baseUrl, $userIp, $file->name),
                     'created_at' => $file->created_at,
                     'updated_at' => $file->updated_at,
                 ];
@@ -733,10 +763,44 @@ class FileController extends Controller
     {
         $escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], $filename);
         $value = 'attachment; filename="' . $escaped . '"';
-        if (preg_match('/[^\x20-\x7E]/', $filename)) {
+        if (preg_match('/[^\x20-\x7E]/', $filename))
+        {
             $value .= '; filename*=UTF-8\'\'' . rawurlencode($filename);
         }
         return $value;
+    }
+
+    /** Log a download and hand the validated file off to nginx. */
+    private function serveClassifiedFile(
+        Request $request,
+        Response $response,
+        File $file,
+        string $internalUri,
+        ?string $downloadName = null
+    ): Response {
+        try
+        {
+            DownloadLog::create([
+                'file_id' => $file->id,
+                'ip_address' => RequestHelper::getClientIp($request) ?: null,
+                'user_agent' => $request->getHeaderLine('User-Agent') ?: null,
+            ]);
+        }
+        catch (\Exception $e)
+        {
+            // Logging must not prevent an otherwise valid download.
+        }
+
+        $response = $response->withHeader('X-Accel-Redirect', $internalUri);
+        $response = $response->withHeader('X-Accel-Buffering', 'no');
+        $response = $response->withHeader('Content-Length', '0');
+        $response = $response->withHeader(
+            'Content-Disposition',
+            $this->buildContentDisposition($downloadName ?: $file->name)
+        );
+        $response = $response->withHeader('Content-Type', 'application/octet-stream');
+        $response->getBody()->write('');
+        return $response;
     }
 
     /**
@@ -750,7 +814,8 @@ class FileController extends Controller
         $providedMd5 = $params['md5'] ?? null;
         $expires = $params['expires'] ?? null;
 
-        if (!$fileId || !$providedMd5 || $expires === null || $expires === '') {
+        if (!$fileId || !$providedMd5 || $expires === null || $expires === '')
+        {
             return $this->renderErrorPage(
                 $response,
                 400,
@@ -763,7 +828,8 @@ class FileController extends Controller
         $path = '/files/serve/' . $fileId;
         $userIp = RequestHelper::getClientIp($request);
 
-        if (!SecureLinkService::verifySecureLink($path, $providedMd5, $expires, $userIp)) {
+        if (!SecureLinkService::verifySecureLink($path, $providedMd5, $expires, $userIp))
+        {
             return $this->renderErrorPage(
                 $response,
                 403,
@@ -775,7 +841,8 @@ class FileController extends Controller
 
         // Find file by ID
         $file = File::find($fileId);
-        if (!$file) {
+        if (!$file)
+        {
             return $this->renderErrorPage(
                 $response,
                 404,
@@ -786,7 +853,8 @@ class FileController extends Controller
         }
 
         // Check if file exists on disk
-        if (!file_exists($file->path)) {
+        if (!is_file((string) $file->path))
+        {
             return $this->renderErrorPage(
                 $response,
                 404,
@@ -796,40 +864,9 @@ class FileController extends Controller
             );
         }
 
-        // Log the download (don't let logging failure block the download)
-        try {
-            DownloadLog::create([
-                'file_id' => $file->id,
-                'ip_address' => RequestHelper::getClientIp($request) ?: null,
-                'user_agent' => $request->getHeaderLine('User-Agent') ?: null,
-            ]);
-        } catch (\Exception $e) {
-            // Silently fail — serving the file is more important than logging
-        }
-
-        // Redirect to nginx internal location so nginx serves the file directly (no PHP streaming)
-        $uploadDirReal = realpath(self::UPLOAD_DIR);
-        if ($uploadDirReal === false || !is_dir($uploadDirReal)) {
-            return $this->renderErrorPage(
-                $response,
-                500,
-                'پوشهٔ آپلود در دسترس نیست',
-                'سرور نمی‌تواند به پوشهٔ فایل‌های آپلود شده دسترسی پیدا کند. این مشکل موقتی است.',
-                'لطفاً چند دقیقه بعد دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.'
-            );
-        }
-        $pathReal = realpath($file->path);
-        if ($pathReal === false || !is_file($pathReal)) {
-            return $this->renderErrorPage(
-                $response,
-                404,
-                'فایل روی دیسک یافت نشد',
-                'فایل فیزیکی در مسیر ذخیره‌سازی پیدا نشد. ممکن است حذف یا منتقل شده باشد.',
-                'لطفا با پشتیبانی تماس بگیرید'
-            );
-        }
-        $baseWithSep = $uploadDirReal . DIRECTORY_SEPARATOR;
-        if ($pathReal !== $uploadDirReal && strpos($pathReal, $baseWithSep) !== 0) {
+        $classification = FileLinkService::classifyFile($file);
+        if ($classification === null)
+        {
             return $this->renderErrorPage(
                 $response,
                 403,
@@ -838,27 +875,125 @@ class FileController extends Controller
                 'لطفا با پشتیبانی تماس بگیرید'
             );
         }
-        $relativePath = str_replace([$baseWithSep, '\\'], ['', '/'], $pathReal);
-        $internalUri = '/internal_uploads/' . $relativePath;
 
-        $response = $response->withHeader('X-Accel-Redirect', $internalUri);
-        $response = $response->withHeader('X-Accel-Buffering', 'no');
-        $response = $response->withHeader('Content-Length', '0');
-        $response = $response->withHeader('Content-Disposition', $this->buildContentDisposition($file->name));
-        $response = $response->withHeader('Content-Type', 'application/octet-stream');
-        $response->getBody()->write('');
-        return $response;
+        return $this->serveClassifiedFile(
+            $request,
+            $response,
+            $file,
+            $classification['internal_uri']
+        );
     }
 
     /**
-     * Serve file from wp-content/uploads path. Creates a file record and logs download if not yet in DB.
-     * URL pattern: /wp-content/uploads/2026/02/filename.rar or /uploads/2026/02/filename.rar.
+     * Submit a delete request for a file owned by the authenticated user.
+     * POST /files/{id}/delete-request  body: { reason?: string }
+     */
+    public function requestFileDeletion(Request $request, Response $response, array $args): Response
+    {
+        $fileId = (int)($args['id'] ?? 0);
+        if ($fileId <= 0)
+        {
+            return $this->json($response, ['error' => 'File ID is required'], 400);
+        }
+
+        $user = User::find($_SESSION['user_id'] ?? 0);
+        if (!$user)
+        {
+            return $this->json($response, ['error' => 'User not found'], 404);
+        }
+
+        $file = File::find($fileId);
+        if (!$file)
+        {
+            return $this->json($response, ['error' => 'File not found'], 404);
+        }
+
+        if ((int)$file->owner !== (int)$user->id)
+        {
+            return $this->json($response, ['error' => 'You do not own this file'], 403);
+        }
+
+        // Prevent duplicate pending requests for the same file
+        $existing = DeleteRequest::where('file_id', $fileId)
+            ->where('status', 'pending')
+            ->first();
+        if ($existing)
+        {
+            return $this->json($response, ['error' => 'A delete request for this file is already pending'], 409);
+        }
+
+        $body = $request->getParsedBody();
+        $reason = isset($body['reason']) ? trim((string)$body['reason']) : null;
+        if ($reason === '')
+        {
+            $reason = null;
+        }
+
+        $deleteRequest = DeleteRequest::create([
+            'file_id' => $fileId,
+            'user_id' => $user->id,
+            'reason' => $reason,
+            'status' => 'pending',
+        ]);
+
+        return $this->json($response, [
+            'message' => 'Delete request submitted successfully. Awaiting admin approval.',
+            'request' => [
+                'id' => $deleteRequest->id,
+                'file_id' => $deleteRequest->file_id,
+                'status' => $deleteRequest->status,
+                'created_at' => $deleteRequest->created_at,
+            ],
+        ], 201);
+    }
+
+    /**
+     * Get delete requests submitted by the authenticated user.
+     * GET /files/delete-requests
+     */
+    public function getUserDeleteRequests(Request $request, Response $response): Response
+    {
+        $user = User::find($_SESSION['user_id'] ?? 0);
+        if (!$user)
+        {
+            return $this->json($response, ['error' => 'User not found'], 404);
+        }
+
+        $requests = DeleteRequest::where('user_id', $user->id)
+            ->orderBy('created_at', 'desc')
+            ->get()
+            ->map(function ($dr)
+            {
+                $file = File::find($dr->file_id);
+                return [
+                    'id' => $dr->id,
+                    'file_id' => $dr->file_id,
+                    'filename' => $file ? $file->name : 'حذف‌شده',
+                    'reason' => $dr->reason,
+                    'status' => $dr->status,
+                    'admin_note' => $dr->admin_note,
+                    'created_at' => $dr->created_at,
+                    'updated_at' => $dr->updated_at,
+                ];
+            });
+
+        return $this->json($response, ['requests' => $requests]);
+    }
+
+    /**
+     * Serve signed native and WordPress storage-relative paths.
+     * WordPress files are registered on first download; native files must already be tracked.
+     * URL patterns:
+     *   /wp-content/uploads/2026/02/filename.rar
+     *   /uploads/2026/02/filename.rar
+     *   /uploads/woocommerce_uploads/2026/02/filename.rar
      * Requires query params md5 and expires (same as file serve); IP is checked when present via the same optional-IP verification.
      */
     public function serveWpContentFile(Request $request, Response $response, array $args): Response
     {
-        $requestedPath = $args['path'] ?? '';
-        if ($requestedPath === '') {
+        $requestedPath = self::normalizeWpUploadPath($args['path'] ?? '', $request->getUri()->getPath());
+        if ($requestedPath === '')
+        {
             return $this->renderErrorPage(
                 $response,
                 400,
@@ -869,7 +1004,8 @@ class FileController extends Controller
         }
 
         // Reject null bytes (directory injection / legacy PHP path issues)
-        if (strpos($requestedPath, "\0") !== false) {
+        if (strpos($requestedPath, "\0") !== false)
+        {
             return $this->renderErrorPage(
                 $response,
                 400,
@@ -882,7 +1018,8 @@ class FileController extends Controller
         $params = $request->getQueryParams();
         $providedMd5 = $params['md5'] ?? null;
         $expires = $params['expires'] ?? null;
-        if ($providedMd5 === null || $providedMd5 === '' || $expires === null || $expires === '') {
+        if ($providedMd5 === null || $providedMd5 === '' || $expires === null || $expires === '')
+        {
             return $this->renderErrorPage(
                 $response,
                 400,
@@ -894,7 +1031,8 @@ class FileController extends Controller
 
         $pathForHash = $request->getUri()->getPath();
         $userIp = RequestHelper::getClientIp($request);
-        if (!SecureLinkService::verifySecureLink($pathForHash, $providedMd5, $expires, $userIp)) {
+        if (!SecureLinkService::verifySecureLink($pathForHash, $providedMd5, $expires, $userIp))
+        {
             return $this->renderErrorPage(
                 $response,
                 403,
@@ -905,85 +1043,84 @@ class FileController extends Controller
         }
 
         $host = $request->getHeaderLine('Host');
-        $basePath = self::getWpUploadsBase($host);
-        $baseReal = realpath($basePath);
-        if ($baseReal === false || !is_dir($baseReal)) {
-            return $this->renderErrorPage(
+        $baseUrl = (string)(getenv('UPLOAD_URL') ?: ($_ENV['UPLOAD_URL'] ?? ''));
+        $uriPath = $request->getUri()->getPath();
+        $isNativePath = str_starts_with($uriPath, '/uploads/')
+            && FileLinkService::isNativeUploadHost($host, $baseUrl)
+            && preg_match('#^(?:new|[1-9][0-9]*)/[0-9]{4}/[0-9]{2}/[0-9]{2}/[^/]+$#D', $requestedPath);
+
+        if ($isNativePath)
+        {
+            $target = FileLinkService::resolveNativePath($requestedPath);
+            if ($target === null)
+            {
+                return $this->renderErrorPage(
+                    $response,
+                    404,
+                    'فایل یافت نشد',
+                    'فایل درخواستی در مسیر آپلودها وجود ندارد. ممکن است فایل حذف شده یا آدرس اشتباه باشد.',
+                    'لطفا با پشتیبانی تماس بگیرید'
+                );
+            }
+
+            // Native path URLs never create records implicitly. This prevents a
+            // signed path from exposing an untracked file in the upload tree.
+            $file = File::where('path', $target['resolved_path'])->first();
+            if (!$file)
+            {
+                return $this->renderErrorPage(
+                    $response,
+                    404,
+                    'فایل یافت نشد',
+                    'برای فایل درخواستی رکورد معتبری در سیستم وجود ندارد.',
+                    'لطفا با پشتیبانی تماس بگیرید'
+                );
+            }
+
+            return $this->serveClassifiedFile(
+                $request,
                 $response,
-                404,
-                'پوشهٔ آپلود در دسترس نیست',
-                'پوشهٔ ذخیرهٔ فایل‌های وردپرس برای این دامنه یافت نشد یا قابل دسترسی نیست.',
-                'لطفا با پشتیبانی تماس بگیرید'
+                $file,
+                $target['internal_uri']
             );
         }
 
-        $baseWithSep = $baseReal . DIRECTORY_SEPARATOR;
-        $pathWithBase = $baseWithSep . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $requestedPath);
-        $resolved = realpath($pathWithBase);
-        if ($resolved === false || !is_file($resolved)) {
+        $target = FileLinkService::resolveWpPath($requestedPath, $host);
+        if ($target === null)
+        {
             return $this->renderErrorPage(
                 $response,
                 404,
                 'فایل یافت نشد',
-                'فایل درخواستی در مسیر آپلودها وجود ندارد. ممکن است فایل حذف شده یا آدرس اشتباه باشد.',
+                'فایل درخواستی در مسیر آپلودهای این دامنه وجود ندارد یا مسیر آن معتبر نیست.',
                 'لطفا با پشتیبانی تماس بگیرید'
             );
         }
 
-        // Strict directory containment: resolved must be exactly base or under it (prevents e.g. base="uploads" matching "uploads_backup/..")
-        if ($resolved !== $baseReal && strpos($resolved, $baseWithSep) !== 0) {
-            return $this->renderErrorPage(
-                $response,
-                403,
-                'مسیر فایل معتبر نیست',
-                'مسیر فراتر از محدودهٔ مجاز آپلودها است. دسترسی غیرمجاز تشخیص داده شد.',
-                'لطفا با پشتیبانی تماس بگیرید'
-            );
-        }
-
+        $resolved = $target['resolved_path'];
         $name = basename($resolved);
         $extension = strtolower(pathinfo($resolved, PATHINFO_EXTENSION));
         $size = filesize($resolved);
 
         $file = File::where('path', $resolved)->first();
-        if (!$file) {
+        if (!$file)
+        {
             $file = File::create([
                 'owner' => 1,
                 'name' => $name,
                 'type' => $extension,
                 'size' => $size,
                 'path' => $resolved,
-                'host' => $host !== '' ? $host : null,
+                'host' => $target['domain'] ?? (FileLinkService::normalizeHost($host) ?: null),
             ]);
         }
 
-        try {
-            DownloadLog::create([
-                'file_id' => $file->id,
-                'ip_address' => RequestHelper::getClientIp($request) ?: null,
-                'user_agent' => $request->getHeaderLine('User-Agent') ?: null,
-            ]);
-        } catch (\Exception $e) {
-            // Don't block the download
-        }
-
-        // Redirect to nginx internal location (per-domain) so nginx serves the file directly
-        $domain = strtolower(explode(':', $host)[0]);
-        $map = self::loadWpDomainsMap();
-        if ($domain !== '' && isset($map[$domain])) {
-            $prefix = 'internal_wp_' . self::sanitizeDomainForInternal($domain);
-        } else {
-            $prefix = 'internal_wp_default';
-        }
-        $relativePath = str_replace([$baseWithSep, '\\'], ['', '/'], $resolved);
-        $internalUri = '/' . $prefix . '/' . $relativePath;
-
-        $response = $response->withHeader('X-Accel-Redirect', $internalUri);
-        $response = $response->withHeader('X-Accel-Buffering', 'no');
-        $response = $response->withHeader('Content-Length', '0');
-        $response = $response->withHeader('Content-Disposition', $this->buildContentDisposition($name));
-        $response = $response->withHeader('Content-Type', 'application/octet-stream');
-        $response->getBody()->write('');
-        return $response;
+        return $this->serveClassifiedFile(
+            $request,
+            $response,
+            $file,
+            $target['internal_uri'],
+            $name
+        );
     }
 }

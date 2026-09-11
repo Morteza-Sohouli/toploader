@@ -102,6 +102,8 @@ $app->group('/files', function ($group)
     $group->get('/tus-result/{uploadId}', [FileController::class, 'getTusUploadResult']);
     $group->get('/valid-mime-types', [FileController::class, 'getValidMimeTypes']);
     $group->get('/uploads', [FileController::class, 'getUserUploads']);
+    $group->get('/delete-requests', [FileController::class, 'getUserDeleteRequests']);
+    $group->post('/{id}/delete-request', [FileController::class, 'requestFileDeletion']);
 })->add(AuthMiddleware::class);
 
 // TUS hooks (called internally by tusd, validated via HMAC token)
@@ -112,6 +114,7 @@ $app->get('/files/serve/{id}', [FileController::class, 'serveFile']);
 
 // WordPress wp-content/uploads: serve files and log downloads (path e.g. 2026/02/filename.rar)
 $app->get('/wp-content/uploads/{path:.+}', [FileController::class, 'serveWpContentFile']);
+// Captures full path including woocommerce_uploads/2018/03/file.rar
 $app->get('/uploads/{path:.+}', [FileController::class, 'serveWpContentFile']);
 
 // Stats Route (protected by auth middleware)
@@ -124,6 +127,11 @@ $app->group('/admin', function ($group)
     $group->get('/files', [AdminController::class, 'getAllFiles']);
     $group->delete('/files/{id}', [AdminController::class, 'deleteFile']);
 
+    // Delete requests
+    $group->get('/delete-requests', [AdminController::class, 'getDeleteRequests']);
+    $group->post('/delete-requests/{id}/approve', [AdminController::class, 'approveDeleteRequest']);
+    $group->post('/delete-requests/{id}/reject', [AdminController::class, 'rejectDeleteRequest']);
+
     // User management
     $group->get('/users', [AdminController::class, 'getAllUsers']);
     $group->post('/users', [AdminController::class, 'createUser']);
@@ -132,6 +140,11 @@ $app->group('/admin', function ($group)
 
     // Stats
     $group->get('/stats', [AdminController::class, 'getStats']);
+
+    // SSL management
+    $group->get('/ssl', [AdminController::class, 'getSslInfo']);
+    $group->post('/ssl', [AdminController::class, 'uploadSsl']);
+    $group->post('/ssl/reload', [AdminController::class, 'reloadSsl']);
 })->add(AdminMiddleware::class);
 
 $app->run();
