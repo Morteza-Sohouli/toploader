@@ -286,12 +286,18 @@ class FileController extends Controller
 
         try
         {
+            $storedPath = FileLinkService::canonicalizeNativeFilePath($targetPath);
+            if ($storedPath === null)
+            {
+                throw new \RuntimeException('Uploaded file could not be resolved inside the upload directory.');
+            }
+
             $fileRecord = File::create([
                 'owner' => $userId,
                 'name' => $sanitizedFilename,
                 'type' => $extension,
                 'size' => $fileSize,
-                'path' => $targetPath,
+                'path' => $storedPath,
                 // get domain
                 'host' => parse_url((string)(getenv('UPLOAD_URL') ?: ($_ENV['UPLOAD_URL'] ?? '')), PHP_URL_HOST) ?: 'unknown',
             ]);
@@ -482,12 +488,18 @@ class FileController extends Controller
         $host = $request->getHeaderLine('Host');
         try
         {
+            $storedPath = FileLinkService::canonicalizeNativeFilePath($targetPath);
+            if ($storedPath === null)
+            {
+                throw new \RuntimeException('Uploaded file could not be resolved inside the upload directory.');
+            }
+
             $fileRecord = File::create([
                 'owner' => $user->id,
                 'name' => $sanitizedFilename,
                 'type' => $fileExtension,
                 'size' => $fileSize,
-                'path' => $targetPath,
+                'path' => $storedPath,
                 'host' => $host !== '' ? $host : null,
             ]);
         }
@@ -1065,7 +1077,7 @@ class FileController extends Controller
 
             // Native path URLs never create records implicitly. This prevents a
             // signed path from exposing an untracked file in the upload tree.
-            $file = File::where('path', $target['resolved_path'])->first();
+            $file = FileLinkService::findNativeFile($target);
             if (!$file)
             {
                 return $this->renderErrorPage(

@@ -180,6 +180,51 @@ final class FileLinkService
         return $resolved;
     }
 
+    /**
+     * Resolve an existing native file to its canonical absolute path.
+     * This also accepts legacy database paths containing safe ".." segments,
+     * but only when the final file remains inside the native upload root.
+     */
+    public static function canonicalizeNativeFilePath(string $path): ?string
+    {
+        $resolvedPath = realpath($path);
+        if ($resolvedPath === false || !is_file($resolvedPath)) {
+            return null;
+        }
+
+        return self::relativePathWithin($resolvedPath, self::getNativeUploadRoot()) !== null
+            ? $resolvedPath
+            : null;
+    }
+
+    /**
+     * Find the tracked native file for a resolved target. Older uploads stored
+     * non-canonical absolute paths, so compare their safely resolved paths when
+     * an exact canonical database lookup does not match.
+     */
+    public static function findNativeFile(array $target): ?File
+    {
+        $resolvedPath = $target['resolved_path'] ?? null;
+        if (!is_string($resolvedPath) || $resolvedPath === '') {
+            return null;
+        }
+
+        $file = File::where('path', $resolvedPath)->first();
+        if ($file) {
+            return $file;
+        }
+
+        $name = basename($resolvedPath);
+        foreach (File::where('name', $name)->get() as $candidate) {
+            $candidatePath = self::canonicalizeNativeFilePath((string) $candidate->path);
+            if ($candidatePath !== null && self::pathsEqual($candidatePath, $resolvedPath)) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
     public static function resolveWpPath(string $relativePath, string $host): ?array
     {
         $domain = self::normalizeHost($host);
@@ -283,6 +328,13 @@ final class FileLinkService
         }
 
         return str_replace('\\', '/', substr($pathReal, strlen($rootWithSeparator)));
+    }
+
+    private static function pathsEqual(string $left, string $right): bool
+    {
+        return DIRECTORY_SEPARATOR === '\\'
+            ? strcasecmp($left, $right) === 0
+            : strcmp($left, $right) === 0;
     }
 
     private static function sanitizeDomainForInternal(string $domain): string

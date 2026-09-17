@@ -14,6 +14,9 @@ use App\Controllers\AdminController;
 use App\Middleware\AuthMiddleware;
 use App\Middleware\AdminMiddleware;
 use App\Middleware\LoginRateLimitMiddleware;
+use App\Service\SecureLinkService;
+
+SecureLinkService::assertConfigured();
 
 if (session_status() === PHP_SESSION_NONE)
 {
@@ -37,8 +40,11 @@ $app->addRoutingMiddleware();
 // Add body parsing middleware
 $app->addBodyParsingMiddleware();
 
-// Add error middleware
-$app->addErrorMiddleware(true, true, true);
+// Detailed exception output must be explicitly enabled for local development.
+$debugValue = getenv('APP_DEBUG');
+$displayErrorDetails = is_string($debugValue)
+    && filter_var($debugValue, FILTER_VALIDATE_BOOLEAN);
+$app->addErrorMiddleware($displayErrorDetails, true, true);
 
 // ! only for development!!!!
 // Add CORS middleware for development (must be last to execute first)

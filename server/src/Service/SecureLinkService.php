@@ -10,8 +10,24 @@ final class SecureLinkService
 {
     private static function getSecret(): string
     {
-        $v = getenv('SECURE_LINK_SECRET');
-        return $v !== false && $v !== '' ? $v : 'xswtvbbny1k';
+        $value = getenv('SECURE_LINK_SECRET');
+        $secret = is_string($value) ? trim($value) : '';
+
+        if ($secret === '') {
+            throw new \RuntimeException('SECURE_LINK_SECRET must be configured.');
+        }
+
+        if (strlen($secret) < 32) {
+            throw new \RuntimeException('SECURE_LINK_SECRET must contain at least 32 characters.');
+        }
+
+        return $secret;
+    }
+
+    /** Fail early during application startup when secure-link signing is unsafe. */
+    public static function assertConfigured(): void
+    {
+        self::getSecret();
     }
 
     /**

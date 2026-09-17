@@ -6,11 +6,24 @@ use App\Models\File;
 use App\Service\FileLinkService;
 use App\Service\SecureLinkService;
 
+putenv('SECURE_LINK_SECRET=test-only-secret-with-at-least-32-characters');
+
 function expectTrue(bool $condition, string $message): void
 {
     if (!$condition) {
         throw new RuntimeException($message);
     }
+}
+
+function expectRuntimeException(callable $callback, string $message): void
+{
+    try {
+        $callback();
+    } catch (RuntimeException $exception) {
+        return;
+    }
+
+    throw new RuntimeException($message);
 }
 
 function testFile(string $path, int $id, ?string $host = null): File
@@ -78,10 +91,36 @@ try {
         'An expired signature must not verify.'
     );
 
+    putenv('SECURE_LINK_SECRET');
+    expectRuntimeException(
+        static fn() => SecureLinkService::assertConfigured(),
+        'A missing secure-link secret must fail closed.'
+    );
+    putenv('SECURE_LINK_SECRET=too-short');
+    expectRuntimeException(
+        static fn() => SecureLinkService::assertConfigured(),
+        'A weak secure-link secret must fail closed.'
+    );
+    putenv('SECURE_LINK_SECRET=test-only-secret-with-at-least-32-characters');
+
     expectTrue(
         FileLinkService::resolveNativePath('../new/2099/12/31/report file_abc.pdf') === null,
         'Traversal outside the native upload root must be rejected.'
     );
+    $legacyLexicalPath = __DIR__ . '/../src/Controllers/../../uploads/new/2099/12/31/report file_abc.pdf';
+    expectTrue(
+        FileLinkService::canonicalizeNativeFilePath($legacyLexicalPath) === realpath($newPath),
+        'Legacy non-canonical database paths must resolve to the canonical native file path.'
+    );
+    $outsideNativePath = tempnam(sys_get_temp_dir(), 'topload-native-path-test-');
+    try {
+        expectTrue(
+            FileLinkService::canonicalizeNativeFilePath($outsideNativePath) === null,
+            'Paths outside the native upload root must not be accepted as native files.'
+        );
+    } finally {
+        @unlink($outsideNativePath);
+    }
     expectTrue(
         FileLinkService::normalizeHost('wp.example.test@attacker.test') === '',
         'Malformed Host headers must not be accepted for storage mapping.'
