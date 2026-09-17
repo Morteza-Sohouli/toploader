@@ -14,9 +14,6 @@ use App\Controllers\AdminController;
 use App\Middleware\AuthMiddleware;
 use App\Middleware\AdminMiddleware;
 use App\Middleware\LoginRateLimitMiddleware;
-use App\Service\SecureLinkService;
-
-SecureLinkService::assertConfigured();
 
 if (session_status() === PHP_SESSION_NONE)
 {

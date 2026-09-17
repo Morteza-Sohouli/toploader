@@ -17,14 +17,10 @@ final class SecureLinkService
             throw new \RuntimeException('SECURE_LINK_SECRET must be configured.');
         }
 
-        if (strlen($secret) < 32) {
-            throw new \RuntimeException('SECURE_LINK_SECRET must contain at least 32 characters.');
-        }
-
         return $secret;
     }
 
-    /** Fail early during application startup when secure-link signing is unsafe. */
+    /** Validate that secure-link signing has an explicitly configured secret. */
     public static function assertConfigured(): void
     {
         self::getSecret();

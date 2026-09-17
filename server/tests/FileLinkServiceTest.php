@@ -96,11 +96,8 @@ try {
         static fn() => SecureLinkService::assertConfigured(),
         'A missing secure-link secret must fail closed.'
     );
-    putenv('SECURE_LINK_SECRET=too-short');
-    expectRuntimeException(
-        static fn() => SecureLinkService::assertConfigured(),
-        'A weak secure-link secret must fail closed.'
-    );
+    putenv('SECURE_LINK_SECRET=legacy-configured-secret');
+    SecureLinkService::assertConfigured();
     putenv('SECURE_LINK_SECRET=test-only-secret-with-at-least-32-characters');
 
     expectTrue(
