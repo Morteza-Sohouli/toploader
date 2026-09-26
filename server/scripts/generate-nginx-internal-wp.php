@@ -14,7 +14,7 @@ $jsonPath = null;
 if (!empty($argv[1])) {
     $jsonPath = is_file($argv[1]) ? $argv[1] : null;
 } else {
-    foreach (['/var/www/config/wp-config.json', '/var/www/config/wp-domains.json'] as $p) {
+    foreach (['/var/www/html/config/wp-domains.json'] as $p) {
         if (is_file($p)) {
             $jsonPath = $p;
             break;

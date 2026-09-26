@@ -11,6 +11,10 @@ fi
 # Regenerate autoload so new classes under src/ are loadable (bind-mount can have newer code than vendor).
 composer dump-autoload --no-dev
 
+# Create the application tables on a fresh database. Existing tables and data
+# are left untouched.
+php /var/www/html/scripts/initialize-database.php
+
 # Generate nginx internal locations for WP uploads from wp-domains.json (or wp-config.json)
 if [ -f /var/www/html/scripts/generate-nginx-internal-wp.php ]; then
     php /var/www/html/scripts/generate-nginx-internal-wp.php || true
